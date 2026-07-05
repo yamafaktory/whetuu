@@ -10,11 +10,6 @@ prompt, the same for everyone. Every module runs concurrently via `std.Io`
 (`Io.async` → `Future`, backed by `Io.Threaded`), so a full render — including a
 `git` call and a toolchain version probe — completes in a few milliseconds.
 
-```
-~/dev/lsnav ·  main [!4] ·  v0.17.0 · ⏱ 5.0s
- (star, in Zig orange)
-```
-
 > **Requires a [Nerd Font](https://www.nerdfonts.com/).** The prompt uses Nerd
 > Font glyphs for the git branch, language logos, and the prompt character.
 > Without one those glyphs show as tofu boxes.
