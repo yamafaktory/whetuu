@@ -61,3 +61,22 @@ eval "$(whetuu init zsh)"
 `whetuu init <shell>` prints the integration script; the shell hook calls
 `whetuu prompt …` on every prompt, passing the last exit status, command
 duration, and terminal width.
+
+## History
+
+whetuu keeps its own command history — a single, deduplicated, cross-shell
+store at `$XDG_DATA_HOME/whetuu/history` (or `~/.local/share/whetuu/history`).
+The fish integration records every command there and binds **up-arrow** to an
+interactive picker:
+
+- **type to filter** — each space-separated word must match (case-insensitive)
+- **↑ / ↓** — move the selection (↑ goes further back in time)
+- **Enter** — run the chosen command immediately
+- **Esc / Ctrl-C** — cancel
+
+The list is bottom-anchored: the most recent command sits just above the search
+line, older commands climb upward, each prefixed with how long ago it ran
+(`5 mins ago`, `2 hours ago`). The selected row is highlighted full-width in the
+prompt's star purple. The picker draws on `/dev/tty`, so nothing but the chosen
+command reaches stdout. Duplicates are collapsed; there is no configuration.
+(fish is wired up today; bash/zsh capture is a one-liner away.)
