@@ -8,6 +8,9 @@ const Context = @import("context.zig").Context;
 const Span = @import("style.zig").Span;
 const style = @import("style.zig");
 
+/// Segment glyph: the shared hourglass.
+const icon = style.icon.duration;
+
 /// Minimum runtime before the segment appears. Below this the timing is noise.
 const min_ms = 2_000;
 
@@ -18,7 +21,7 @@ pub fn run(io: std.Io, arena: Allocator, ctx: *const Context) ?[]const Span {
     if (ctx.duration_ms < min_ms) return null;
 
     const human = humanize(arena, ctx.duration_ms) catch return null;
-    const text = std.fmt.allocPrint(arena, "⏱ {s}", .{human}) catch return null;
+    const text = std.fmt.allocPrint(arena, icon ++ " {s}", .{human}) catch return null;
     return style.single(arena, .{ .color = .yellow }, text) catch null;
 }
 

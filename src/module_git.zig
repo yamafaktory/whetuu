@@ -16,8 +16,8 @@ const style = @import("style.zig");
 /// segment rather than blocking the shell.
 const timeout_ms = 250;
 
-/// Nerd Font branch glyph shown before the branch name: nf-pl-branch (U+E0A0).
-const branch_icon = "\u{e0a0}";
+/// The shared branch glyph shown before the branch name.
+const branch_icon = style.icon.branch;
 
 /// Aggregated working-tree state parsed from porcelain v2 output. `branch` is
 /// borrowed from the raw git output, so it lives as long as that buffer.
@@ -135,8 +135,8 @@ fn parseCount(tok: []const u8) u32 {
     return std.fmt.parseInt(u32, tok[1..], 10) catch 0;
 }
 
-/// Builds the bracketed status string (e.g. `[+2!1⇡1]`), or null when the tree
-/// is clean and in sync (nothing to show).
+/// Builds the bracketed status string (e.g. `[+2 !1 ⇡1]`), or null when the
+/// tree is clean and in sync (nothing to show).
 fn statusText(arena: Allocator, info: GitInfo) Allocator.Error!?[]const u8 {
     var buf: [128]u8 = undefined;
     var w: Writer = .fixed(&buf);
@@ -151,20 +151,29 @@ fn statusText(arena: Allocator, info: GitInfo) Allocator.Error!?[]const u8 {
     return try arena.dupe(u8, out);
 }
 
-/// Writes the status markers between brackets in a fixed priority order.
+/// Writes the status markers between brackets in a fixed priority order, one
+/// space between groups so the counts read as separate facts.
 fn writeMarkers(w: *Writer, info: GitInfo) Writer.Error!void {
+    const markers = [_]struct { symbol: []const u8, count: u32 }{
+        .{ .symbol = "=", .count = info.conflicts },
+        .{ .symbol = "+", .count = info.staged },
+        .{ .symbol = "!", .count = info.modified },
+        .{ .symbol = "?", .count = info.untracked },
+        .{ .symbol = "⇡", .count = info.ahead },
+        .{ .symbol = "⇣", .count = info.behind },
+    };
+
     try w.writeByte('[');
-    if (info.conflicts > 0) try w.print("={d}", .{info.conflicts});
 
-    if (info.staged > 0) try w.print("+{d}", .{info.staged});
+    var first = true;
+    for (markers) |marker| {
+        if (marker.count == 0) continue;
 
-    if (info.modified > 0) try w.print("!{d}", .{info.modified});
+        if (!first) try w.writeByte(' ');
 
-    if (info.untracked > 0) try w.print("?{d}", .{info.untracked});
-
-    if (info.ahead > 0) try w.print("⇡{d}", .{info.ahead});
-
-    if (info.behind > 0) try w.print("⇣{d}", .{info.behind});
+        try w.print("{s}{d}", .{ marker.symbol, marker.count });
+        first = false;
+    }
 
     try w.writeByte(']');
 }
@@ -210,7 +219,7 @@ test "status text omits empty groups and orders markers" {
 
     const info: GitInfo = .{ .staged = 2, .modified = 1, .ahead = 3 };
     const text = (try statusText(arena.allocator(), info)).?;
-    try std.testing.expectEqualStrings("[+2!1⇡3]", text);
+    try std.testing.expectEqualStrings("[+2 !1 ⇡3]", text);
 }
 
 test "clean in-sync tree shows no status" {

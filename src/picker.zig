@@ -10,20 +10,22 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 const Entry = @import("history.zig").Entry;
+const Io = std.Io;
 const linux = std.os.linux;
 const posix = std.posix;
-const reltime = @import("reltime.zig");
+const style = @import("style.zig");
+const time_ago = @import("time_ago.zig");
 
-/// whetuu's emblem, shown as the search prompt: nf-md-star_face (U+F09A5).
-const star = "\u{f09a5}";
+/// Central SGR escapes; the picker writes to the terminal directly, so it
+/// needs no shell wrapping.
+const sgr = style.sgr;
 
-/// The star's purple as an SGR truecolor triple, reused for the search prompt
-/// and the full-line selection highlight so the picker matches the prompt.
-const purple = "168;85;247";
+/// whetuu's emblem, shown as the search prompt.
+const star = style.icon.star;
 
 /// Fixed width of the relative-time column, sized for the longest label
-/// ("11 months ago"), so commands line up just past it.
-const time_width = 13;
+/// ("11mo"), so commands line up just past it.
+const time_width = 4;
 
 /// Terminal dimensions, with sane fallbacks when the size cannot be queried.
 const Size = struct {
@@ -39,14 +41,25 @@ const Key = union(enum) {
     down,
     enter,
     other,
+    tab,
+    tick,
     up,
 };
 
 /// Opens the picker over `items` (newest first), returning the chosen command
-/// (borrowed from `items`) or null when the user cancels, the list is empty, or
-/// no controlling terminal is available. `now` is the current unix time, used to
-/// render each entry's age. The terminal is always restored on exit.
-pub fn pick(arena: Allocator, items: []const Entry, now: i64) ?[]const u8 {
+/// or null when the user cancels, the list is empty, or no controlling terminal
+/// is available. `initial` seeds the query — the shell passes whatever was
+/// already typed on the command line, so opening the picker never loses it.
+/// Tab copies the selected entry into the query (with a trailing
+/// space) so flags can be appended; Enter returns the selected entry, or the
+/// query text itself when nothing matches it. Entry ages are re-read from the
+/// clock on every frame and the key read times out once a second, so the time
+/// column stays live while the picker idles. Per-frame allocations (the
+/// filtered list and the frame buffer) come from a scratch arena reset every
+/// iteration, so an idle picker's memory stays bounded no matter how long it
+/// ticks; only the query and the returned command live on `arena`. The
+/// terminal is always restored on exit.
+pub fn pick(io: Io, arena: Allocator, items: []const Entry, initial: []const u8) ?[]const u8 {
     if (items.len == 0) return null;
 
     const fd = posix.openat(posix.AT.FDCWD, "/dev/tty", .{ .ACCMODE = .RDWR }, 0) catch return null;
@@ -59,15 +72,20 @@ pub fn pick(arena: Allocator, items: []const Entry, now: i64) ?[]const u8 {
     writeAll(fd, "\x1b[?1049h");
     defer writeAll(fd, "\x1b[?1049l");
 
+    var frame_arena: std.heap.ArenaAllocator = .init(arena);
     var query: std.ArrayList(u8) = .empty;
+    query.appendSlice(arena, initial) catch {};
     var selected: usize = 0;
     var base: usize = 0;
 
     while (true) {
-        const shown = filter(arena, items, query.items) catch items;
+        _ = frame_arena.reset(.retain_capacity);
+        const scratch = frame_arena.allocator();
+        const now = Io.Clock.now(.real, io).toSeconds();
+        const shown = filter(scratch, items, query.items) catch items;
         if (selected >= shown.len) selected = if (shown.len == 0) 0 else shown.len - 1;
 
-        render(arena, fd, query.items, shown, selected, &base, size(fd), now);
+        render(scratch, fd, query.items, shown, selected, &base, size(fd), now);
 
         switch (readKey(fd)) {
             .up => {
@@ -76,7 +94,15 @@ pub fn pick(arena: Allocator, items: []const Entry, now: i64) ?[]const u8 {
             .down => {
                 if (selected > 0) selected -= 1;
             },
-            .enter => return if (shown.len == 0) null else shown[selected].command,
+            .enter => return if (shown.len == 0) queryFallback(query.items) else shown[selected].command,
+            .tab => {
+                if (shown.len == 0) continue;
+
+                query.clearRetainingCapacity();
+                query.appendSlice(arena, shown[selected].command) catch {};
+                query.append(arena, ' ') catch {};
+                selected = 0;
+            },
             .backspace => {
                 _ = query.pop();
                 selected = 0;
@@ -86,7 +112,7 @@ pub fn pick(arena: Allocator, items: []const Entry, now: i64) ?[]const u8 {
                 selected = 0;
             },
             .cancel => return null,
-            .other => {},
+            .tick, .other => {},
         }
     }
 }
@@ -115,6 +141,15 @@ fn matches(command: []const u8, query: []const u8) bool {
     return true;
 }
 
+/// The command Enter falls back to when no entry matches: the query text the
+/// user typed (e.g. a tabbed entry plus new flags), stripped of the padding
+/// spaces, or null when the query is effectively empty.
+fn queryFallback(query: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trim(u8, query, " ");
+
+    return if (trimmed.len == 0) null else trimmed;
+}
+
 /// Case-insensitive substring test. An empty needle always matches.
 fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
     if (needle.len == 0) return true;
@@ -130,24 +165,28 @@ fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
 }
 
 /// Switches the terminal to raw mode: no line buffering, no echo, and signals
-/// delivered as bytes so we can handle Ctrl-C ourselves.
+/// delivered as bytes so we can handle Ctrl-C ourselves. VMIN=0 with VTIME=10
+/// makes a key read give up after one second so the frame (and the entry ages
+/// in it) refreshes even while the user is idle.
 fn enterRaw(fd: posix.fd_t, original: posix.termios) !void {
     var raw = original;
     raw.lflag.ICANON = false;
     raw.lflag.ECHO = false;
     raw.lflag.ISIG = false;
     raw.lflag.IEXTEN = false;
-    raw.cc[@intFromEnum(posix.V.MIN)] = 1;
-    raw.cc[@intFromEnum(posix.V.TIME)] = 0;
+    raw.cc[@intFromEnum(posix.V.MIN)] = 0;
+    raw.cc[@intFromEnum(posix.V.TIME)] = 10;
 
     try posix.tcsetattr(fd, .FLUSH, raw);
 }
 
-/// Reads one keypress, decoding the escape sequences for the arrow keys.
+/// Reads one keypress, decoding the escape sequences for the arrow keys. A
+/// read that comes back empty is the VTIME timeout elapsing, reported as a
+/// `.tick` so the caller redraws with fresh entry ages.
 fn readKey(fd: posix.fd_t) Key {
     var buf: [8]u8 = undefined;
     const n = posix.read(fd, &buf) catch return .cancel;
-    if (n == 0) return .cancel;
+    if (n == 0) return .tick;
 
     if (buf[0] == 0x1b) {
         if (n >= 3 and buf[1] == '[') {
@@ -163,6 +202,7 @@ fn readKey(fd: posix.fd_t) Key {
 
     return switch (buf[0]) {
         '\r', '\n' => .enter,
+        '\t' => .tab,
         0x7f, 0x08 => .backspace,
         0x03, 0x04 => .cancel,
         else => if (buf[0] >= 0x20 and buf[0] < 0x7f) Key{ .char = buf[0] } else .other,
@@ -198,44 +238,62 @@ fn frame(arena: Allocator, f: *std.ArrayList(u8), query: []const u8, shown: []co
     }
 
     // Search line pinned to the last row; no trailing newline so it never
-    // scrolls, leaving the cursor parked right after the query.
-    try f.appendSlice(arena, "\x1b[38;2;" ++ purple ++ "m" ++ star ++ "\x1b[0m ");
-    try f.appendSlice(arena, query);
+    // scrolls, leaving the cursor parked right after the query. The query is
+    // sanitized because Tab can copy a stored command into it.
+    try f.appendSlice(arena, sgr.fg_purple ++ star ++ sgr.reset ++ " ");
+    try f.appendSlice(arena, try sanitize(arena, query));
 }
 
 /// Appends one list row: a fixed-width relative-time column then the command.
-/// The selected row spans the full width in the star's purple; others show a
-/// muted time column and the plain command.
+/// The selected row spans the full width in the star's purple. The time column
+/// is muted on every row, selected or not, so only the command stands out.
 fn appendEntry(arena: Allocator, f: *std.ArrayList(u8), entry: Entry, now: i64, selected: bool, cols: usize) !void {
     var buf: [24]u8 = undefined;
-    const when = reltime.relative(&buf, now, entry.timestamp);
+    const when = time_ago.relative(&buf, now, entry.timestamp);
 
     const room = if (cols > time_width + 1) cols - time_width - 1 else 0;
-    const command = truncate(entry.command, room);
+    const command = truncate(try sanitize(arena, entry.command), room);
 
     if (!selected) {
-        try f.appendSlice(arena, "\x1b[90m");
-        try appendPadded(arena, f, when, time_width);
-        try f.appendSlice(arena, "\x1b[0m ");
+        try f.appendSlice(arena, sgr.dim);
+        try appendRightAligned(arena, f, when, time_width);
+        try f.appendSlice(arena, sgr.reset ++ " ");
         try f.appendSlice(arena, command);
 
         return;
     }
 
-    try f.appendSlice(arena, "\x1b[48;2;" ++ purple ++ "m\x1b[97m");
-    try appendPadded(arena, f, when, time_width);
-    try f.append(arena, ' ');
+    try f.appendSlice(arena, sgr.bg_purple ++ sgr.fg_lavender);
+    try appendRightAligned(arena, f, when, time_width);
+    try f.appendSlice(arena, sgr.bright_white ++ " ");
     try f.appendSlice(arena, command);
     try appendSpaces(arena, f, cols - (time_width + 1 + width(command)));
-    try f.appendSlice(arena, "\x1b[0m");
+    try f.appendSlice(arena, sgr.reset);
 }
 
-/// Appends `s` then pads with spaces to `w` columns (no-op when already wider).
-fn appendPadded(arena: Allocator, f: *std.ArrayList(u8), s: []const u8, w: usize) !void {
-    try f.appendSlice(arena, s);
+/// Returns `text` with every control byte replaced by `?` (allocating only
+/// when needed), so a stored command cannot inject escape sequences into the
+/// list it is rendered in.
+fn sanitize(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
+    for (text) |c| {
+        if (style.isControlByte(c)) break;
+    } else return text;
 
+    const out = try arena.dupe(u8, text);
+    for (out) |*c| {
+        if (style.isControlByte(c.*)) c.* = '?';
+    }
+
+    return out;
+}
+
+/// Pads with spaces to `w` columns then appends `s`, right-aligning it so the
+/// unit letters of the time column line up (no-op padding when already wider).
+fn appendRightAligned(arena: Allocator, f: *std.ArrayList(u8), s: []const u8, w: usize) !void {
     const shown_width = width(s);
     if (shown_width < w) try appendSpaces(arena, f, w - shown_width);
+
+    try f.appendSlice(arena, s);
 }
 
 /// Appends `n` spaces.
@@ -292,6 +350,19 @@ test "matches requires every query token" {
     try std.testing.expect(matches("anything", ""));
 }
 
+test "appendRightAligned pads on the left so unit letters line up" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var f: std.ArrayList(u8) = .empty;
+    try appendRightAligned(arena.allocator(), &f, "9m", time_width);
+    try std.testing.expectEqualStrings("  9m", f.items);
+
+    f.clearRetainingCapacity();
+    try appendRightAligned(arena.allocator(), &f, "11mo", time_width);
+    try std.testing.expectEqualStrings("11mo", f.items);
+}
+
 test "filter narrows to matching entries, order preserved" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
@@ -305,6 +376,30 @@ test "filter narrows to matching entries, order preserved" {
     try std.testing.expectEqual(@as(usize, 2), got.len);
     try std.testing.expectEqualStrings("git push", got[0].command);
     try std.testing.expectEqualStrings("git pull", got[1].command);
+}
+
+test "selected row mutes the time column in lavender" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var f: std.ArrayList(u8) = .empty;
+    try appendEntry(arena.allocator(), &f, .{ .command = "ls", .timestamp = 40 }, 100, true, 80);
+    try std.testing.expect(std.mem.indexOf(u8, f.items, sgr.fg_lavender ++ "  1m" ++ sgr.bright_white ++ " ls") != null);
+}
+
+test "rows replace control bytes in stored commands" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var f: std.ArrayList(u8) = .empty;
+    try appendEntry(arena.allocator(), &f, .{ .command = "ls\x1b[31mred", .timestamp = 40 }, 100, false, 80);
+    try std.testing.expect(std.mem.indexOf(u8, f.items, "ls?[31mred") != null);
+}
+
+test "queryFallback returns the trimmed query and null when empty" {
+    try std.testing.expectEqualStrings("git push --force", queryFallback("git push --force ").?);
+    try std.testing.expect(queryFallback("   ") == null);
+    try std.testing.expect(queryFallback("") == null);
 }
 
 test "truncate backs off to a utf-8 boundary" {

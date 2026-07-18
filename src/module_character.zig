@@ -6,29 +6,22 @@
 const std = @import("std");
 
 const Color = @import("style.zig").Color;
-const Context = @import("context.zig").Context;
-const Io = std.Io;
 const Lang = @import("module_language.zig").Lang;
 const Rgb = @import("style.zig").Rgb;
 const Span = @import("style.zig").Span;
-const language = @import("module_language.zig");
+const style = @import("style.zig");
 
-/// Default glyph when no language is detected: nf-md-star_face (U+F09A5).
-const star = "\u{f09a5}";
+/// Default glyph when no language is detected: whetuu's star emblem.
+const star = style.icon.star;
 
-/// Default (success, no language) character color: purple.
-const purple: Rgb = .{ .r = 168, .g = 85, .b = 247 };
+/// Default (success, no language) character color: the whetuu brand purple.
+const purple: Rgb = style.purple;
 
-/// Renders the character span, detecting the current project language to pick
-/// the glyph and color.
-pub fn run(io: Io, ctx: *const Context) Span {
-    return choose(language.detect(io, ctx.cwd), ctx.exit_status);
-}
-
-/// Pure color decision, split out so it is testable without I/O: always the
-/// star, in the language brand color (or purple), overridden to theme red on a
-/// failed command.
-fn choose(lang: ?Lang, exit_status: u8) Span {
+/// Pure color decision — the caller supplies the language already detected
+/// for the language segment, so this module performs no I/O at all: always
+/// the star, in the language brand color (or purple), overridden to theme red
+/// on a failed command.
+pub fn choose(lang: ?Lang, exit_status: u8) Span {
     if (exit_status != 0) return .{ .style = .{ .bold = true, .color = .red }, .text = star };
 
     const color: Rgb = if (lang) |l| l.color else purple;

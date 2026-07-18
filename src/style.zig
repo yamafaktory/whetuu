@@ -65,6 +65,52 @@ pub const Span = struct {
     text: []const u8,
 };
 
+/// Every Nerd Font glyph whetuu renders (except per-language logos, which
+/// live in the language table). Codepoints in the doc comments — swap any
+/// that render wrong in your font.
+pub const icon = struct {
+    /// Powerline branch (U+E0A0).
+    pub const branch = "\u{e0a0}";
+    /// nf-md-timer_sand (U+F051B), an hourglass.
+    pub const duration = "\u{f051b}";
+    /// nf-md-star_face (U+F09A5), whetuu's emblem.
+    pub const star = "\u{f09a5}";
+};
+
+/// A light lavender tint of `purple`, used where muted text must stay
+/// readable on the purple highlight.
+pub const lavender: Rgb = .{ .b = 254, .g = 180, .r = 216 };
+
+/// `lavender` as the `R;G;B` fragment of an SGR truecolor escape.
+pub const lavender_sgr = std.fmt.comptimePrint("{d};{d};{d}", .{ lavender.r, lavender.g, lavender.b });
+
+/// whetuu's brand purple, the color of the star emblem.
+pub const purple: Rgb = .{ .b = 247, .g = 85, .r = 168 };
+
+/// `purple` as the `R;G;B` fragment of an SGR truecolor escape, for building
+/// escape sequences at comptime.
+pub const purple_sgr = std.fmt.comptimePrint("{d};{d};{d}", .{ purple.r, purple.g, purple.b });
+
+/// Raw SGR escapes for output written straight to a terminal (the picker, the
+/// help screen), where no shell width-wrapping is needed. Prompt segments must
+/// go through `write` instead.
+pub const sgr = struct {
+    pub const bg_purple = "\x1b[48;2;" ++ purple_sgr ++ "m";
+    pub const bold = "\x1b[1m";
+    pub const bright_white = "\x1b[97m";
+    pub const dim = "\x1b[90m";
+    pub const fg_lavender = "\x1b[38;2;" ++ lavender_sgr ++ "m";
+    pub const fg_purple = "\x1b[38;2;" ++ purple_sgr ++ "m";
+    pub const reset = "\x1b[0m";
+};
+
+/// True for bytes that must never reach the terminal raw (C0 controls and
+/// DEL): they enable escape-sequence injection through untrusted text such as
+/// directory or command names.
+pub fn isControlByte(c: u8) bool {
+    return c < 0x20 or c == 0x7f;
+}
+
 /// Allocates a one-element span slice — the common case for modules that emit a
 /// single styled run.
 pub fn single(arena: Allocator, sty: Style, text: []const u8) Allocator.Error![]const Span {
@@ -96,7 +142,7 @@ fn wrapEnd(w: *Writer, shell: Shell) Writer.Error!void {
 /// non-bold style is written as plain text with no escapes at all.
 pub fn write(w: *Writer, shell: Shell, style: Style, text: []const u8) Writer.Error!void {
     if (style.rgb == null and style.color == .default and !style.bold) {
-        try w.writeAll(text);
+        try writeSanitized(w, text);
         return;
     }
 
@@ -112,11 +158,27 @@ pub fn write(w: *Writer, shell: Shell, style: Style, text: []const u8) Writer.Er
 
     try wrapEnd(w, shell);
 
-    try w.writeAll(text);
+    try writeSanitized(w, text);
 
     try wrapStart(w, shell);
     try w.writeAll("\x1b[0m");
     try wrapEnd(w, shell);
+}
+
+/// Writes `text` with every control byte replaced by `?`, so untrusted names
+/// cannot smuggle escape sequences into the terminal.
+fn writeSanitized(w: *Writer, text: []const u8) Writer.Error!void {
+    var start: usize = 0;
+
+    for (text, 0..) |c, i| {
+        if (!isControlByte(c)) continue;
+
+        try w.writeAll(text[start..i]);
+        try w.writeByte('?');
+        start = i + 1;
+    }
+
+    try w.writeAll(text[start..]);
 }
 
 test "default style writes plain text with no escapes" {
@@ -138,6 +200,17 @@ test "zsh wraps escapes in percent braces and honors bold" {
     var w: Writer = .fixed(&buf);
     try write(&w, .zsh, .{ .color = .green, .bold = true }, "y");
     try std.testing.expectEqualStrings("%{\x1b[1;32m%}y%{\x1b[0m%}", w.buffered());
+}
+
+test "control bytes in text are replaced, styled or not" {
+    var buf: [64]u8 = undefined;
+    var w: Writer = .fixed(&buf);
+    try write(&w, .fish, .{}, "a\x1b]2;x\x07b");
+    try std.testing.expectEqualStrings("a?]2;x?b", w.buffered());
+
+    var styled: Writer = .fixed(&buf);
+    try write(&styled, .fish, .{ .color = .red }, "\x1bc");
+    try std.testing.expectEqualStrings("\x1b[31m?c\x1b[0m", styled.buffered());
 }
 
 test "rgb emits a truecolor escape and overrides color" {

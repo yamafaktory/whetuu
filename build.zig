@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_cmd.addArgs(args);
+    run_cmd.addPassthruArgs();
 
     const run_step = b.step("run", "Run whetuu");
     run_step.dependOn(&run_cmd.step);
@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(exe_test).step);
 
     const fmt_step = b.step("fmt", "Format all source files");
-    fmt_step.dependOn(&b.addFmt(.{ .paths = &.{ "src", "build.zig" } }).step);
+    fmt_step.dependOn(&b.addFmt(.{ .paths = &.{ b.path("src"), b.path("build.zig") } }).step);
 
     const check_step = b.step("check", "Check if whetuu compiles");
     const check = b.addExecutable(.{ .name = "whetuu", .root_module = root });

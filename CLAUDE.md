@@ -61,7 +61,11 @@ concurrently via `std.Io` (`Io.async` → `Future`, backed by `Io.Threaded`).
 
 1. Format: `zig build fmt`
 2. Test: `zig build test`
-3. Update `README.md` if the change affects user-visible behaviour.
+3. Update `README.md` — always re-read it after a change and reconcile it with
+   the new behaviour. Anything user-visible (features, flags, keybindings,
+   output format, shell integration, storage paths) must be reflected there in
+   the same change; also fix any statement the change has made stale. Only
+   purely internal refactors leave the README untouched.
 
 ## Build steps
 

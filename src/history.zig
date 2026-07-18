@@ -39,8 +39,13 @@ pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, now:
 
     const line = try std.fmt.allocPrint(arena, "{d}\t{s}\n", .{ now, try escape(arena, trimmed) });
 
-    var file = try Dir.createFileAbsolute(io, path, .{ .truncate = false, .lock = .exclusive });
+    var file = try Dir.createFileAbsolute(io, path, .{ .truncate = false, .lock = .exclusive, .permissions = .fromMode(0o600) });
     defer file.close(io);
+
+    // Command lines routinely hold paths and secrets, so the store must stay
+    // owner-only; re-assert it on every append so files created by older
+    // versions (world-readable) converge too.
+    file.setPermissions(io, .fromMode(0o600)) catch {};
 
     var buf: [1024]u8 = undefined;
     var writer = file.writer(io, &buf);
