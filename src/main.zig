@@ -53,6 +53,8 @@ fn runPrompt(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: 
         .shell = opts.shell,
         .cwd = cwd_buf[0..cwd_len],
         .home = environ.get("HOME") orelse "",
+        .user = environ.get("USER") orelse "",
+        .ssh = environ.get("SSH_CONNECTION") != null or environ.get("SSH_TTY") != null,
         .width = opts.width,
         .duration_ms = opts.duration_ms,
         .exit_status = opts.exit_status,
@@ -144,6 +146,7 @@ test {
     _ = @import("module_directory.zig");
     _ = @import("module_git.zig");
     _ = @import("module_language.zig");
+    _ = @import("module_user_host.zig");
     _ = @import("render.zig");
     _ = @import("style.zig");
     _ = @import("time_ago.zig");

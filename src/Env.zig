@@ -11,6 +11,10 @@ shell: Shell,
 cwd: []const u8,
 /// Value of `$HOME`, used to collapse the directory to `~`.
 home: []const u8,
+/// Value of `$USER`; empty when unset.
+user: []const u8 = "",
+/// True when the shell runs over SSH (`$SSH_CONNECTION` or `$SSH_TTY` set).
+ssh: bool = false,
 /// Terminal width in columns; 0 when unknown.
 width: u16,
 /// Milliseconds the previous command ran, as reported by the shell.

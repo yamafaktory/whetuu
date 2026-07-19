@@ -16,6 +16,7 @@ const directory = @import("module_directory.zig");
 const git = @import("module_git.zig");
 const language = @import("module_language.zig");
 const style = @import("style.zig");
+const user_host = @import("module_user_host.zig");
 
 /// Written between adjacent visible segments: a light grey dot, padded so it
 /// breathes between the colored segments on either side.
@@ -32,7 +33,10 @@ pub fn render(io: Io, arena: Allocator, env: *const Env, w: *Writer) Writer.Erro
     var language_future = io.async(language.run, .{ io, arena, env });
     var duration_future = io.async(cmd_duration.run, .{ io, arena, env });
 
+    // user@host does no I/O beyond a hostname syscall, so it is rendered
+    // synchronously while the async modules work.
     var wrote_any = false;
+    try writeSegment(w, env.shell, user_host.run(arena, env), &wrote_any);
     try writeSegment(w, env.shell, directory_future.await(io), &wrote_any);
     try writeSegment(w, env.shell, git_future.await(io), &wrote_any);
 

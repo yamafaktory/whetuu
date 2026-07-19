@@ -21,9 +21,11 @@ Left to right, each shown only when relevant:
 
 | Module        | Shows                                                                       |
 |---------------|-----------------------------------------------------------------------------|
+| `user_host`   | `user@host` in bold green — only over SSH (`$SSH_CONNECTION`/`$SSH_TTY`) or when root (then bold red as a warning) |
 | `directory`   | Current directory, `$HOME` collapsed to `~`; keeps the anchor + as many trailing dirs as fit the width (`~/…/projects/client`) |
 | `git` branch  | Branch glyph + current branch (or `(detached)`), in magenta                 |
-| `git` status  | `[=conflicts +staged !modified ?untracked ⇡ahead ⇣behind]`                  |
+| `git` state   | In-progress operation in yellow while one is underway: `(rebasing 2/7)`, `(merging)`, `(cherry-picking)`, `(reverting)`, `(bisecting)` — read straight from `.git`, no extra subprocess |
+| `git` status  | `[=conflicts $stashes +staged !modified ?untracked ⇡ahead ⇣behind]`         |
 | `language`    | Logo + toolchain version in the brand color — 39 languages & tools, detected from a project manifest (`Cargo.toml`, `mix.exs`, …), a source-file extension (`*.odin`, `*.rkt`, …), or an infra marker (`flake.nix`, `Dockerfile`, `*.tf` for Terraform/OpenTofu) |
 | `cmd_duration`| Timer glyph + `<time>` when the last command ran ≥ 2 s                      |
 | `character`   | A star, purple by default or in the project's language brand color — forced red after a failed command |
