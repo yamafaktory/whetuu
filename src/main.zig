@@ -75,18 +75,24 @@ fn runHistory(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args:
     const home = environ.get("HOME") orelse "";
     const path = (try history.storePath(arena, xdg, home)) orelse return;
 
+    // The process inherits the shell's working directory, so recording and
+    // scoping need no extra flag from the init scripts.
+    var cwd_buf: [max_path_bytes]u8 = undefined;
+    const cwd_len = std.process.currentPath(io, &cwd_buf) catch 0;
+    const cwd = cwd_buf[0..cwd_len];
+
     if (args.len > 0 and std.mem.eql(u8, args[0], "add")) {
         const opts = try cli.parseHistoryAdd(args[1..]);
         if (opts.exit_status != 0) return;
 
         const parts = try arena.alloc([]const u8, opts.words.len);
         for (opts.words, parts) |word, *part| part.* = word;
-        return history.add(io, arena, path, try std.mem.join(arena, " ", parts), unixNow(io));
+        return history.add(io, arena, path, try std.mem.join(arena, " ", parts), cwd, unixNow(io));
     }
 
     const initial = if (args.len >= 2 and std.mem.eql(u8, args[0], "--query")) args[1] else "";
     const items = try history.load(io, arena, path);
-    const chosen = picker.pick(io, arena, items, initial) orelse return;
+    const chosen = picker.pick(io, arena, items, .{ .initial = initial, .cwd = cwd, .home = home }) orelse return;
 
     var buf: [4096]u8 = undefined;
     var fw = Io.File.stdout().writer(io, &buf);

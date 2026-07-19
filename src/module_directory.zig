@@ -87,8 +87,9 @@ fn format(arena: Allocator, cwd: []const u8, home: []const u8, budget: usize) Al
 }
 
 /// Replaces a leading `$HOME` with `~`. Returns a borrowed slice when no change
-/// is needed, otherwise an arena-allocated string.
-fn collapseHome(arena: Allocator, cwd: []const u8, home: []const u8) Allocator.Error![]const u8 {
+/// is needed, otherwise an arena-allocated string. Also used by the picker for
+/// its scope label, so the one collapsing rule lives here.
+pub fn collapseHome(arena: Allocator, cwd: []const u8, home: []const u8) Allocator.Error![]const u8 {
     if (home.len == 0) return cwd;
     if (std.mem.eql(u8, cwd, home)) return "~";
 

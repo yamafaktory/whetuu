@@ -68,13 +68,20 @@ duration, and terminal width.
 whetuu keeps its own command history — a single, deduplicated, cross-shell
 store at `$XDG_DATA_HOME/whetuu/history` (or `~/.local/share/whetuu/history`).
 Commands are recorded after they finish and only when they exited with status
-0, so typos and failed runs never clutter the picker.
+0, so typos and failed runs never clutter the picker. Each command is recorded
+together with the directory it ran in.
 The fish integration records every command there and binds **up-arrow** to an
 interactive picker; anything already typed on the command line carries over
-into the picker's search field:
+into the picker's search field. The picker opens scoped to the **current
+directory's history** — the commands you actually run in this project — and
+falls back to all history when the directory has none yet. A bar at the top of
+the screen shows both scopes with the active one highlighted —
+`~/dev/whetuu | all`:
 
 - **type to filter** — each space-separated word must match (case-insensitive)
 - **↑ / ↓** — move the selection (↑ goes further back in time)
+- **Ctrl+G** — toggle the scope between this directory's history and all
+  history
 - **Tab** — copy the selected command into the search field (plus a trailing
   space) to edit it or append flags before running
 - **Enter** — run the chosen command immediately; when nothing matches the
@@ -85,5 +92,6 @@ The list is bottom-anchored: the most recent command sits just above the search
 line, older commands climb upward, each prefixed with how long ago it ran
 (`5m`, `2h`, `3d`). The selected row is highlighted full-width in the
 prompt's star purple. The picker draws on `/dev/tty`, so nothing but the chosen
-command reaches stdout. Duplicates are collapsed; there is no configuration.
-All three shells (fish, bash, zsh) record into the shared store.
+command reaches stdout. Duplicates are collapsed per directory, so the same
+command run in two projects keeps its own recency in each; there is no
+configuration. All three shells (fish, bash, zsh) record into the shared store.
