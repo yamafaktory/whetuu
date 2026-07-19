@@ -1,8 +1,8 @@
-# 󰦥 whetū
+# 🌟 whetū
 
-*whetū* is Māori for "star" — fitting, since a star (`nf-md-star_face`, the
-same glyph as in this heading) is the default prompt character. The binary is
-installed as the ASCII command `whetuu`.
+*whetū* is Māori for "star" — fitting, since a star (the Nerd Font glyph
+`nf-md-star_face`) is the default prompt character. The binary is installed as
+the ASCII command `whetuu`.
 
 An opinionated, **zero-config** cross-shell prompt written in Zig 0.17.
 
@@ -25,7 +25,7 @@ Left to right, each shown only when relevant:
 | `git` branch  | Branch glyph + current branch (or `(detached)`), in magenta                 |
 | `git` status  | `[=conflicts +staged !modified ?untracked ⇡ahead ⇣behind]`                  |
 | `language`    | Logo + toolchain version in the brand color — 39 languages & tools, detected from a project manifest (`Cargo.toml`, `mix.exs`, …), a source-file extension (`*.odin`, `*.rkt`, …), or an infra marker (`flake.nix`, `Dockerfile`, `*.tf` for Terraform/OpenTofu) |
-| `cmd_duration`| `󰔛 <time>` when the last command ran ≥ 2 s                                  |
+| `cmd_duration`| Timer glyph + `<time>` when the last command ran ≥ 2 s                      |
 | `character`   | A star, purple by default or in the project's language brand color — forced red after a failed command |
 
 ## Build
