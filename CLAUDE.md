@@ -15,15 +15,36 @@ concurrently via `std.Io` (`Io.async` → `Future`, backed by `Io.Threaded`).
 
 ## Zig Style
 
+Follow Zig master's own conventions: the official Style Guide in the language
+reference plus the practices observed in current `std`. Where the two conflict
+with personal habit, Zig wins.
+
 ### Naming
 
-- camelCase for functions and methods
-- lower-case snake_case for variables, parameters, and constants
-- PascalCase for types, structs, and enums
-- prefer `const foo: Type = .{ .field = value };` over `const foo = Type{ .field = value };`
+- camelCase for functions and methods; TitleCase for types and for functions
+  that return a `type`; snake_case for everything else (variables, parameters,
+  constants, namespaces).
+- Acronyms and initialisms follow the same casing rules as ordinary words
+  (`readU32Be`, `XmlParser`), even two-letter ones.
+- Avoid filler words in type names: `Value`, `Data`, `Context`, `Manager`,
+  `State`, `utils`, `misc`. Everything is a value and all logic manages state —
+  such words communicate nothing.
+- Choose names based on the fully-qualified namespace and avoid redundant
+  segments (`json.Value`, not `json.JsonValue`).
+- No underscore prefixes. Prefer verbose names at outer scopes and abbreviated
+  names at inner scopes.
+- Method receivers are short names derived from the type (`w: *Writer`,
+  `env: Env`, `list: *DoublyLinkedList`) — never `self`.
+- File names: a file that is a struct with top-level fields is `TitleCase.zig`;
+  a namespace file is `snake_case.zig`. Directories are snake_case.
+- prefer `const foo: Type = .{ .field = value };` and decl literals
+  (`.empty`, `.init`) over `const foo = Type{ … };`
 - pass allocators explicitly; use `errdefer` for cleanup on error
-- when an import property is referenced more than once in a file (e.g. `std.os.linux.errno`), introduce a file-scope or local `const` alias and use it throughout instead of repeating the dotted path
-- use underscores as digit separators in integer literals with 4 or more digits (e.g. `1_000`, `2_000`)
+- when an import property is referenced more than once in a file (e.g.
+  `std.os.linux.errno`), introduce a file-scope or local `const` alias and use
+  it throughout instead of repeating the dotted path
+- use underscores as digit separators in integer literals with 4 or more digits
+  (e.g. `1_000`, `2_000`)
 
 ### Control flow
 
@@ -32,20 +53,32 @@ concurrently via `std.Io` (`Io.async` → `Future`, backed by `Io.Threaded`).
 
 ### Layout
 
-- preferred file order: `//!` module doc comment, `const Self = @This();`, imports, `const log = std.log.scoped(...)`
-- Sort `@import` declarations alphabetically (std first, then local by filename).
-- Sort consecutive `const`/`var` declarations alphabetically (type aliases, file-scope constants, buffer declarations) when their order does not affect semantics.
-- Sort struct field declarations alphabetically.
-- Sort functions and methods alphabetically within each file or struct.
-- Sort enum variants alphabetically; add a trailing comma after the last variant.
-- Add a trailing comma after the last element of any multi-element struct, array, or tuple literal so `zig fmt` expands each element to its own line.
-- After any control flow block (`if`, `for`, `while`) add a blank line if more code follows in the same scope.
-- Before any control flow block (`if`, `for`, `while`) add a blank line if code precedes it in the same scope.
-- Add a blank line before a `return` if there is any code before it in the same scope.
+- `zig fmt` is authoritative: 4-space indent, braces on the same line, aim for
+  100 columns. Add a trailing comma after the last element of any list longer
+  than two so `zig fmt` expands each element to its own line.
+- File order: `//!` module doc comment; for a file-as-struct,
+  `const TypeName = @This();` named after the type (never `Self`); imports;
+  file-scope constants; fields; declarations. `Self` is acceptable only inside
+  generic `fn (comptime T: type) type` factories.
+- Imports are grouped, not alphabetized: `builtin` (with comptime-derived
+  consts), then `std`, then aliases of std declarations
+  (`const assert = std.debug.assert;`), then local file imports.
+- Order declarations logically, not alphabetically: struct fields in meaning or
+  dependency order (`r, g, b`, not `b, g, r`), related functions adjacent, the
+  public API reading top-down before its helpers, enum variants in whatever
+  order the domain suggests.
+- Keep code compact: no systematic blank lines around control flow or before
+  `return`. Use a blank line only to separate logical steps within a function.
 
 ### Documentation
 
-- Use Zig doc-comments everywhere: `//!` at the top of every file to describe the module, `///` before every function, type, public constant, and enum variant. Keep plain `//` only for inline notes and section dividers inside function bodies.
+- `//!` top-level doc comment on every file; `///` on public declarations and
+  anything non-obvious. Omit information that is redundant given the name of
+  the thing being documented; duplicating a doc comment across similar
+  functions is fine.
+- Use the word "assume" for invariants whose violation is unchecked illegal
+  behavior, and "assert" for invariants checked by a safety check or explicit
+  `assert`.
 - Comments should explain why, not what.
 
 ### Tests

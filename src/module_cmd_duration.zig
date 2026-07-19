@@ -2,9 +2,9 @@
 //! once it crosses a threshold worth noticing.
 
 const std = @import("std");
-
 const Allocator = std.mem.Allocator;
-const Context = @import("context.zig").Context;
+
+const Env = @import("Env.zig");
 const Span = @import("style.zig").Span;
 const style = @import("style.zig");
 
@@ -16,11 +16,11 @@ const min_ms = 2_000;
 
 /// Renders the duration segment, or null when the last command was fast or
 /// allocation fails.
-pub fn run(io: std.Io, arena: Allocator, ctx: *const Context) ?[]const Span {
+pub fn run(io: std.Io, arena: Allocator, env: *const Env) ?[]const Span {
     _ = io;
-    if (ctx.duration_ms < min_ms) return null;
+    if (env.duration_ms < min_ms) return null;
 
-    const human = humanize(arena, ctx.duration_ms) catch return null;
+    const human = humanize(arena, env.duration_ms) catch return null;
     const text = std.fmt.allocPrint(arena, icon ++ " {s}", .{human}) catch return null;
     return style.single(arena, .{ .color = .yellow }, text) catch null;
 }
@@ -70,13 +70,13 @@ test "hours, minutes, seconds" {
 }
 
 test "below threshold renders nothing" {
-    const ctx: Context = .{
+    const env: Env = .{
+        .shell = .fish,
         .cwd = "/",
+        .home = "/home/davy",
+        .width = 80,
         .duration_ms = 1_000,
         .exit_status = 0,
-        .home = "/home/davy",
-        .shell = .fish,
-        .width = 80,
     };
-    try std.testing.expect(run(undefined, std.testing.allocator, &ctx) == null);
+    try std.testing.expect(run(undefined, std.testing.allocator, &env) == null);
 }

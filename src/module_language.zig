@@ -4,10 +4,10 @@
 //! falling back to just the language icon if that fails.
 
 const std = @import("std");
-
 const Allocator = std.mem.Allocator;
-const Context = @import("context.zig").Context;
 const Io = std.Io;
+
+const Env = @import("Env.zig");
 const Rgb = @import("style.zig").Rgb;
 const Span = @import("style.zig").Span;
 const style = @import("style.zig");
@@ -19,15 +19,15 @@ const timeout_ms = 200;
 /// A detectable language: the files that identify it, how to display it (Nerd
 /// Font logo + brand color), and the command that prints its version.
 pub const Lang = struct {
+    name: []const u8,
+    icon: []const u8,
+    color: Rgb,
+    markers: []const []const u8,
     argv: []const []const u8,
     /// Fallback version command, tried when `argv` yields nothing — for
     /// ecosystems where two toolchains share the same markers (OpenTofu and
     /// Terraform both own `*.tf`).
     argv_alt: ?[]const []const u8 = null,
-    color: Rgb,
-    icon: []const u8,
-    markers: []const []const u8,
-    name: []const u8,
 };
 
 /// Detection table, in priority order. The first language whose marker exists in
@@ -128,8 +128,8 @@ pub const Result = struct {
 /// Detects the project language and renders the segment (logo + version) in
 /// one pass. `spans` is null when the directory matches no known language or
 /// allocation fails.
-pub fn run(io: Io, arena: Allocator, ctx: *const Context) Result {
-    const lang = detect(io, ctx.cwd) orelse return .{};
+pub fn run(io: Io, arena: Allocator, env: *const Env) Result {
+    const lang = detect(io, env.cwd) orelse return .{};
 
     const text = label: {
         const version = probeAnyVersion(io, arena, lang) orelse
@@ -173,7 +173,6 @@ fn splitMarkers(comptime wildcard: bool) []const MarkerRef {
         for (langs, 0..) |lang, idx| {
             for (lang.markers) |marker| {
                 if (std.mem.startsWith(u8, marker, "*.") != wildcard) continue;
-
                 list = list ++ &[_]MarkerRef{.{ marker, idx }};
             }
         }
@@ -196,9 +195,7 @@ fn detectIn(io: Io, path: []const u8) ?Lang {
     while (true) {
         const entry = (it.next(io) catch break) orelse break;
         const idx = markerIndex(entry.name) orelse continue;
-
         if (idx < best) best = idx;
-
         if (best == 0) break;
     }
 
@@ -210,11 +207,9 @@ fn detectIn(io: Io, path: []const u8) ?Lang {
 /// short wildcard list is scanned only as far as it could still beat that.
 fn markerIndex(name: []const u8) ?usize {
     const exact = exact_markers.get(name);
-
     for (wildcard_markers) |ref| {
         const marker, const idx = ref;
         if (exact != null and idx >= exact.?) break;
-
         if (markerMatches(marker, name)) return idx;
     }
 
@@ -227,7 +222,6 @@ fn markerMatches(marker: []const u8, name: []const u8) bool {
     if (!std.mem.startsWith(u8, marker, "*.")) return std.mem.eql(u8, marker, name);
 
     const ext = marker[1..];
-
     return name.len > ext.len and std.mem.endsWith(u8, name, ext);
 }
 
@@ -238,7 +232,6 @@ fn probeAnyVersion(io: Io, arena: Allocator, lang: Lang) ?[]const u8 {
     if (probeVersion(io, arena, lang.argv)) |version| return version;
 
     const alt = lang.argv_alt orelse return null;
-
     return probeVersion(io, arena, alt);
 }
 

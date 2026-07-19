@@ -7,12 +7,12 @@
 //! the render/input loop is inherently terminal I/O and is exercised by hand.
 
 const std = @import("std");
-
 const Allocator = std.mem.Allocator;
-const Entry = @import("history.zig").Entry;
 const Io = std.Io;
 const linux = std.os.linux;
 const posix = std.posix;
+
+const Entry = @import("history.zig").Entry;
 const style = @import("style.zig");
 const time_ago = @import("time_ago.zig");
 
@@ -35,15 +35,15 @@ const Size = struct {
 
 /// A keypress decoded from the raw terminal input stream.
 const Key = union(enum) {
-    backspace,
-    cancel,
     char: u8,
-    down,
     enter,
-    other,
     tab,
-    tick,
+    backspace,
     up,
+    down,
+    cancel,
+    tick,
+    other,
 };
 
 /// Opens the picker over `items` (newest first), returning the chosen command
@@ -146,14 +146,12 @@ fn matches(command: []const u8, query: []const u8) bool {
 /// spaces, or null when the query is effectively empty.
 fn queryFallback(query: []const u8) ?[]const u8 {
     const trimmed = std.mem.trim(u8, query, " ");
-
     return if (trimmed.len == 0) null else trimmed;
 }
 
 /// Case-insensitive substring test. An empty needle always matches.
 fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
     if (needle.len == 0) return true;
-
     if (needle.len > haystack.len) return false;
 
     var i: usize = 0;
@@ -214,9 +212,7 @@ fn readKey(fd: posix.fd_t) Key {
 /// while keeping the selection on screen.
 fn render(arena: Allocator, fd: posix.fd_t, query: []const u8, shown: []const Entry, selected: usize, base: *usize, term: Size, now: i64) void {
     const list_rows: usize = if (term.rows > 1) term.rows - 1 else 1;
-
     if (selected < base.*) base.* = selected;
-
     if (selected >= base.* + list_rows) base.* = selected + 1 - list_rows;
 
     var f: std.ArrayList(u8) = .empty;
@@ -233,7 +229,6 @@ fn frame(arena: Allocator, f: *std.ArrayList(u8), query: []const u8, shown: []co
     while (row < list_rows) : (row += 1) {
         const idx = base + (list_rows - 1 - row);
         if (idx < shown.len) try appendEntry(arena, f, shown[idx], now, idx == selected, cols);
-
         try f.appendSlice(arena, "\r\n");
     }
 
@@ -292,7 +287,6 @@ fn sanitize(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
 fn appendRightAligned(arena: Allocator, f: *std.ArrayList(u8), s: []const u8, w: usize) !void {
     const shown_width = width(s);
     if (shown_width < w) try appendSpaces(arena, f, w - shown_width);
-
     try f.appendSlice(arena, s);
 }
 
@@ -315,7 +309,6 @@ fn truncate(line: []const u8, cols: usize) []const u8 {
 
     var end: usize = cols;
     while (end > 0 and line[end] & 0xc0 == 0x80) end -= 1;
-
     return line[0..end];
 }
 
@@ -324,9 +317,7 @@ fn truncate(line: []const u8, cols: usize) []const u8 {
 fn size(fd: posix.fd_t) Size {
     var ws: posix.winsize = undefined;
     const rc = std.os.linux.ioctl(fd, posix.T.IOCGWINSZ, @intFromPtr(&ws));
-
     if (@as(isize, @bitCast(rc)) < 0 or ws.row == 0) return .{ .cols = 80, .rows = 24 };
-
     return .{ .cols = if (ws.col == 0) 80 else ws.col, .rows = ws.row };
 }
 
@@ -338,7 +329,6 @@ fn writeAll(fd: posix.fd_t, bytes: []const u8) void {
         const rc = linux.write(fd, bytes[i..].ptr, bytes.len - i);
         const written: isize = @bitCast(rc);
         if (written <= 0) return;
-
         i += @intCast(written);
     }
 }

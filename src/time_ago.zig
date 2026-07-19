@@ -35,7 +35,6 @@ pub fn relative(buf: []u8, now: i64, then: i64) []const u8 {
     const elapsed: u64 = @intCast(now - then);
     for (units) |unit| {
         if (elapsed < unit.seconds) continue;
-
         return std.fmt.bufPrint(buf, "{d}{s}", .{ elapsed / unit.seconds, unit.name }) catch "";
     }
 

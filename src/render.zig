@@ -4,13 +4,12 @@
 //! synchronously after the segment line.
 
 const std = @import("std");
-
 const Allocator = std.mem.Allocator;
-const Context = @import("context.zig").Context;
 const Io = std.Io;
-const Shell = @import("context.zig").Shell;
-const Span = @import("style.zig").Span;
 const Writer = std.Io.Writer;
+
+const Env = @import("Env.zig");
+const Span = @import("style.zig").Span;
 const character = @import("module_character.zig");
 const cmd_duration = @import("module_cmd_duration.zig");
 const directory = @import("module_directory.zig");
@@ -27,36 +26,35 @@ const separator: Span = .{ .style = .{ .color = .bright_black }, .text = " · " 
 /// stable. The language module runs detection exactly once — its result also
 /// tints the prompt character, which is pure and rendered synchronously after
 /// the segment line.
-pub fn render(io: Io, arena: Allocator, ctx: *const Context, w: *Writer) Writer.Error!void {
-    var directory_future = io.async(directory.run, .{ io, arena, ctx });
-    var git_future = io.async(git.run, .{ io, arena, ctx });
-    var language_future = io.async(language.run, .{ io, arena, ctx });
-    var duration_future = io.async(cmd_duration.run, .{ io, arena, ctx });
+pub fn render(io: Io, arena: Allocator, env: *const Env, w: *Writer) Writer.Error!void {
+    var directory_future = io.async(directory.run, .{ io, arena, env });
+    var git_future = io.async(git.run, .{ io, arena, env });
+    var language_future = io.async(language.run, .{ io, arena, env });
+    var duration_future = io.async(cmd_duration.run, .{ io, arena, env });
 
     var wrote_any = false;
-    try writeSegment(w, ctx.shell, directory_future.await(io), &wrote_any);
-    try writeSegment(w, ctx.shell, git_future.await(io), &wrote_any);
+    try writeSegment(w, env.shell, directory_future.await(io), &wrote_any);
+    try writeSegment(w, env.shell, git_future.await(io), &wrote_any);
 
     const lang_result = language_future.await(io);
-    try writeSegment(w, ctx.shell, lang_result.spans, &wrote_any);
-    try writeSegment(w, ctx.shell, duration_future.await(io), &wrote_any);
+    try writeSegment(w, env.shell, lang_result.spans, &wrote_any);
+    try writeSegment(w, env.shell, duration_future.await(io), &wrote_any);
 
     // The character always appears, on its own line, with a trailing space so
     // the cursor sits one column clear of the symbol.
     try w.writeByte('\n');
-    const ch = character.choose(lang_result.lang, ctx.exit_status);
-    try style.write(w, ctx.shell, ch.style, ch.text);
+    const ch = character.choose(lang_result.lang, env.exit_status);
+    try style.write(w, env.shell, ch.style, ch.text);
     try w.writeByte(' ');
 }
 
 /// Writes one segment's spans, preceded by the separator when a previous
 /// segment is already on the line. Null or empty spans write nothing.
-fn writeSegment(w: *Writer, shell: Shell, spans_opt: ?[]const Span, wrote_any: *bool) Writer.Error!void {
+fn writeSegment(w: *Writer, shell: Env.Shell, spans_opt: ?[]const Span, wrote_any: *bool) Writer.Error!void {
     const spans = spans_opt orelse return;
     if (spans.len == 0) return;
 
     if (wrote_any.*) try style.write(w, shell, separator.style, separator.text);
-
     for (spans) |span| try style.write(w, shell, span.style, span.text);
     wrote_any.* = true;
 }
@@ -71,18 +69,18 @@ test "render emits the directory, a newline, then the trailing character" {
 
     // cwd "/" carries no git repo or language markers, so only the directory
     // segment and the character are deterministic across machines.
-    const ctx: Context = .{
+    const env: Env = .{
+        .shell = .fish,
         .cwd = "/",
+        .home = "/nonexistent-home",
+        .width = 80,
         .duration_ms = 0,
         .exit_status = 0,
-        .home = "/nonexistent-home",
-        .shell = .fish,
-        .width = 80,
     };
 
     var buf: [4096]u8 = undefined;
     var w: Writer = .fixed(&buf);
-    try render(io, arena.allocator(), &ctx, &w);
+    try render(io, arena.allocator(), &env, &w);
 
     const out = w.buffered();
     const newline = std.mem.indexOfScalar(u8, out, '\n').?;

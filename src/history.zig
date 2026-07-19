@@ -70,9 +70,7 @@ pub fn load(io: Io, arena: Allocator, path: []const u8) ![]const Entry {
 /// set, since there is then nowhere cwd-independent and safe to write.
 pub fn storePath(arena: Allocator, xdg_data_home: []const u8, home: []const u8) Allocator.Error!?[]const u8 {
     if (xdg_data_home.len > 0) return try std.fmt.allocPrint(arena, "{s}/whetuu/history", .{xdg_data_home});
-
     if (home.len > 0) return try std.fmt.allocPrint(arena, "{s}/.local/share/whetuu/history", .{home});
-
     return null;
 }
 
@@ -86,10 +84,8 @@ fn dedupe(arena: Allocator, bytes: []const u8) ![]const Entry {
     var it = std.mem.splitBackwardsScalar(u8, bytes, '\n');
     while (it.next()) |line| {
         if (line.len == 0) continue;
-
         const entry = try parse(arena, line);
         if (seen.contains(entry.command)) continue;
-
         try seen.put(entry.command, {});
         try out.append(arena, entry);
     }

@@ -4,12 +4,12 @@
 //! timeout so a slow or huge repository can never stall the prompt.
 
 const std = @import("std");
-
 const Allocator = std.mem.Allocator;
-const Context = @import("context.zig").Context;
 const Io = std.Io;
-const Span = @import("style.zig").Span;
 const Writer = std.Io.Writer;
+
+const Env = @import("Env.zig");
+const Span = @import("style.zig").Span;
 const style = @import("style.zig");
 
 /// Upper bound on the git call. A repo slower than this simply shows no git
@@ -22,20 +22,20 @@ const branch_icon = style.icon.branch;
 /// Aggregated working-tree state parsed from porcelain v2 output. `branch` is
 /// borrowed from the raw git output, so it lives as long as that buffer.
 const GitInfo = struct {
+    branch: []const u8 = "",
+    detached: bool = false,
+    conflicts: u32 = 0,
+    staged: u32 = 0,
+    modified: u32 = 0,
+    untracked: u32 = 0,
     ahead: u32 = 0,
     behind: u32 = 0,
-    branch: []const u8 = "",
-    conflicts: u32 = 0,
-    detached: bool = false,
-    modified: u32 = 0,
-    staged: u32 = 0,
-    untracked: u32 = 0,
 };
 
 /// Renders the git segment, or null when not in a repo (or git is unavailable,
 /// times out, or output cannot be allocated).
-pub fn run(io: Io, arena: Allocator, ctx: *const Context) ?[]const Span {
-    const raw = gitStatus(io, arena, ctx.cwd) orelse return null;
+pub fn run(io: Io, arena: Allocator, env: *const Env) ?[]const Span {
+    const raw = gitStatus(io, arena, env.cwd) orelse return null;
     const info = parse(raw);
 
     // Branch span (glyph + name), plus an optional status group after a space.
@@ -77,7 +77,6 @@ fn parse(raw: []const u8) GitInfo {
     var it = std.mem.splitScalar(u8, raw, 0);
     while (it.next()) |tok| {
         if (tok.len == 0) continue;
-
         switch (tok[0]) {
             '#' => parseHeader(tok, &info),
             '1' => countChange(tok, &info),
@@ -107,7 +106,6 @@ fn parseHeader(tok: []const u8, info: *GitInfo) void {
         } else {
             info.branch = name;
         }
-
         return;
     }
 
@@ -120,18 +118,13 @@ fn parseHeader(tok: []const u8, info: *GitInfo) void {
 /// Counts staged/unstaged changes from a "1"/"2" record's XY field at bytes 2–3.
 fn countChange(tok: []const u8, info: *GitInfo) void {
     if (tok.len < 4) return;
-
-    const staged = tok[2];
-    const worktree = tok[3];
-    if (staged != '.') info.staged += 1;
-
-    if (worktree != '.') info.modified += 1;
+    if (tok[2] != '.') info.staged += 1;
+    if (tok[3] != '.') info.modified += 1;
 }
 
 /// Parses a signed count token like "+3" or "-2" into its magnitude.
 fn parseCount(tok: []const u8) u32 {
     if (tok.len < 2) return 0;
-
     return std.fmt.parseInt(u32, tok[1..], 10) catch 0;
 }
 
@@ -168,9 +161,7 @@ fn writeMarkers(w: *Writer, info: GitInfo) Writer.Error!void {
     var first = true;
     for (markers) |marker| {
         if (marker.count == 0) continue;
-
         if (!first) try w.writeByte(' ');
-
         try w.print("{s}{d}", .{ marker.symbol, marker.count });
         first = false;
     }

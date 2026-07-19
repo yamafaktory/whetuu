@@ -3,9 +3,9 @@
 //! many trailing components as fit, eliding the middle with `…`.
 
 const std = @import("std");
-
 const Allocator = std.mem.Allocator;
-const Context = @import("context.zig").Context;
+
+const Env = @import("Env.zig");
 const Span = @import("style.zig").Span;
 const style = @import("style.zig");
 
@@ -18,9 +18,9 @@ const min_budget: usize = 20;
 
 /// Renders the directory segment. Returns null only if allocation fails, since
 /// a prompt should never abort over the directory.
-pub fn run(io: std.Io, arena: Allocator, ctx: *const Context) ?[]const Span {
+pub fn run(io: std.Io, arena: Allocator, env: *const Env) ?[]const Span {
     _ = io;
-    const text = format(arena, ctx.cwd, ctx.home, budgetForWidth(ctx.width)) catch return null;
+    const text = format(arena, env.cwd, env.home, budgetForWidth(env.width)) catch return null;
     return style.single(arena, .{ .bold = true, .color = .cyan }, text) catch null;
 }
 
@@ -54,9 +54,7 @@ fn format(arena: Allocator, cwd: []const u8, home: []const u8, budget: usize) Al
     var it = std.mem.splitScalar(u8, display, '/');
     while (it.next()) |c| {
         if (c.len == 0) continue;
-
         if (n == comps.len) return display;
-
         comps[n] = c;
         n += 1;
     }
@@ -72,13 +70,10 @@ fn format(arena: Allocator, cwd: []const u8, home: []const u8, budget: usize) Al
     var kept: usize = n - 1;
     while (kept > 1) {
         const trial = kept - 1;
-
         var w = anchor_w + 2; // "/…"
         var i = trial;
         while (i < n) : (i += 1) w += 1 + displayWidth(comps[i]);
-
         if (w > budget) break;
-
         kept = trial;
     }
 
@@ -95,12 +90,10 @@ fn format(arena: Allocator, cwd: []const u8, home: []const u8, budget: usize) Al
 /// is needed, otherwise an arena-allocated string.
 fn collapseHome(arena: Allocator, cwd: []const u8, home: []const u8) Allocator.Error![]const u8 {
     if (home.len == 0) return cwd;
-
     if (std.mem.eql(u8, cwd, home)) return "~";
 
     const under_home = std.mem.startsWith(u8, cwd, home) and cwd.len > home.len and cwd[home.len] == '/';
     if (!under_home) return cwd;
-
     return std.fmt.allocPrint(arena, "~{s}", .{cwd[home.len..]});
 }
 

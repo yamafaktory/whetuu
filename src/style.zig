@@ -5,35 +5,35 @@
 //! placement and line wrapping, so all wrapping lives here and nowhere else.
 
 const std = @import("std");
-
 const Allocator = std.mem.Allocator;
-const Shell = @import("context.zig").Shell;
 const Writer = std.Io.Writer;
+
+const Shell = @import("Env.zig").Shell;
 
 /// A 4-bit ANSI foreground color. `default` emits no color code.
 pub const Color = enum {
-    blue,
-    bright_black,
-    cyan,
     default,
-    green,
-    magenta,
     red,
-    white,
+    green,
     yellow,
+    blue,
+    magenta,
+    cyan,
+    white,
+    bright_black,
 
     /// SGR foreground code for this color. Caller handles `.default` separately.
-    fn code(self: Color) u8 {
-        return switch (self) {
-            .blue => 34,
-            .bright_black => 90,
-            .cyan => 36,
+    fn code(color: Color) u8 {
+        return switch (color) {
             .default => 39,
-            .green => 32,
-            .magenta => 35,
             .red => 31,
-            .white => 37,
+            .green => 32,
             .yellow => 33,
+            .blue => 34,
+            .magenta => 35,
+            .cyan => 36,
+            .white => 37,
+            .bright_black => 90,
         };
     }
 };
@@ -41,9 +41,9 @@ pub const Color = enum {
 /// A 24-bit truecolor, used for brand colors and the purple prompt character
 /// that the 4-bit palette cannot express.
 pub const Rgb = struct {
-    b: u8,
-    g: u8,
     r: u8,
+    g: u8,
+    b: u8,
 };
 
 /// Visual style for a segment's text. When `rgb` is set it wins over `color`,
@@ -77,19 +77,19 @@ pub const icon = struct {
     pub const star = "\u{f09a5}";
 };
 
-/// A light lavender tint of `purple`, used where muted text must stay
-/// readable on the purple highlight.
-pub const lavender: Rgb = .{ .b = 254, .g = 180, .r = 216 };
-
-/// `lavender` as the `R;G;B` fragment of an SGR truecolor escape.
-pub const lavender_sgr = std.fmt.comptimePrint("{d};{d};{d}", .{ lavender.r, lavender.g, lavender.b });
-
 /// whetuu's brand purple, the color of the star emblem.
-pub const purple: Rgb = .{ .b = 247, .g = 85, .r = 168 };
+pub const purple: Rgb = .{ .r = 168, .g = 85, .b = 247 };
 
 /// `purple` as the `R;G;B` fragment of an SGR truecolor escape, for building
 /// escape sequences at comptime.
 pub const purple_sgr = std.fmt.comptimePrint("{d};{d};{d}", .{ purple.r, purple.g, purple.b });
+
+/// A light lavender tint of `purple`, used where muted text must stay
+/// readable on the purple highlight.
+pub const lavender: Rgb = .{ .r = 216, .g = 180, .b = 254 };
+
+/// `lavender` as the `R;G;B` fragment of an SGR truecolor escape.
+pub const lavender_sgr = std.fmt.comptimePrint("{d};{d};{d}", .{ lavender.r, lavender.g, lavender.b });
 
 /// Raw SGR escapes for output written straight to a terminal (the picker, the
 /// help screen), where no shell width-wrapping is needed. Prompt segments must
@@ -104,11 +104,30 @@ pub const sgr = struct {
     pub const reset = "\x1b[0m";
 };
 
-/// True for bytes that must never reach the terminal raw (C0 controls and
-/// DEL): they enable escape-sequence injection through untrusted text such as
-/// directory or command names.
-pub fn isControlByte(c: u8) bool {
-    return c < 0x20 or c == 0x7f;
+/// Writes `text` styled per `style`, with all escape sequences wrapped so the
+/// target shell does not count them toward the prompt width. A `.default`,
+/// non-bold style is written as plain text with no escapes at all.
+pub fn write(w: *Writer, shell: Shell, style: Style, text: []const u8) Writer.Error!void {
+    if (style.rgb == null and style.color == .default and !style.bold) {
+        try writeSanitized(w, text);
+        return;
+    }
+
+    try wrapStart(w, shell);
+    try w.writeAll("\x1b[");
+    if (style.bold) try w.writeAll("1;");
+    if (style.rgb) |c| {
+        try w.print("38;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
+    } else {
+        try w.print("{d}m", .{style.color.code()});
+    }
+    try wrapEnd(w, shell);
+
+    try writeSanitized(w, text);
+
+    try wrapStart(w, shell);
+    try w.writeAll("\x1b[0m");
+    try wrapEnd(w, shell);
 }
 
 /// Allocates a one-element span slice — the common case for modules that emit a
@@ -117,6 +136,13 @@ pub fn single(arena: Allocator, sty: Style, text: []const u8) Allocator.Error![]
     const spans = try arena.alloc(Span, 1);
     spans[0] = .{ .style = sty, .text = text };
     return spans;
+}
+
+/// True for bytes that must never reach the terminal raw (C0 controls and
+/// DEL): they enable escape-sequence injection through untrusted text such as
+/// directory or command names.
+pub fn isControlByte(c: u8) bool {
+    return c < 0x20 or c == 0x7f;
 }
 
 /// Writes the shell-specific opening marker for a non-printing sequence.
@@ -137,42 +163,12 @@ fn wrapEnd(w: *Writer, shell: Shell) Writer.Error!void {
     }
 }
 
-/// Writes `text` styled per `style`, with all escape sequences wrapped so the
-/// target shell does not count them toward the prompt width. A `.default`,
-/// non-bold style is written as plain text with no escapes at all.
-pub fn write(w: *Writer, shell: Shell, style: Style, text: []const u8) Writer.Error!void {
-    if (style.rgb == null and style.color == .default and !style.bold) {
-        try writeSanitized(w, text);
-        return;
-    }
-
-    try wrapStart(w, shell);
-    try w.writeAll("\x1b[");
-    if (style.bold) try w.writeAll("1;");
-
-    if (style.rgb) |c| {
-        try w.print("38;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-    } else {
-        try w.print("{d}m", .{style.color.code()});
-    }
-
-    try wrapEnd(w, shell);
-
-    try writeSanitized(w, text);
-
-    try wrapStart(w, shell);
-    try w.writeAll("\x1b[0m");
-    try wrapEnd(w, shell);
-}
-
 /// Writes `text` with every control byte replaced by `?`, so untrusted names
 /// cannot smuggle escape sequences into the terminal.
 fn writeSanitized(w: *Writer, text: []const u8) Writer.Error!void {
     var start: usize = 0;
-
     for (text, 0..) |c, i| {
         if (!isControlByte(c)) continue;
-
         try w.writeAll(text[start..i]);
         try w.writeByte('?');
         start = i + 1;

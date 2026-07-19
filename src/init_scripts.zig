@@ -4,7 +4,8 @@
 const std = @import("std");
 
 const Io = std.Io;
-const Shell = @import("context.zig").Shell;
+
+const Shell = @import("Env.zig").Shell;
 
 const bash_init = @embedFile("init.bash");
 const fish_init = @embedFile("init.fish");
@@ -15,7 +16,6 @@ const zsh_init = @embedFile("init.zsh");
 /// dispatch is testable without touching stdout.
 fn script(shell_name: []const u8) error{UnknownShell}![]const u8 {
     const shell = std.meta.stringToEnum(Shell, shell_name) orelse return error.UnknownShell;
-
     return switch (shell) {
         .bash => bash_init,
         .fish => fish_init,

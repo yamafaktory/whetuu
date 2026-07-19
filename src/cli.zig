@@ -4,7 +4,7 @@
 
 const std = @import("std");
 
-const Shell = @import("context.zig").Shell;
+const Shell = @import("Env.zig").Shell;
 
 /// Values parsed from `whetuu history add`: the exit status the shell reported
 /// for the command and the command words following `--`.
@@ -16,10 +16,10 @@ pub const HistoryAddArgs = struct {
 /// Values parsed from `whetuu prompt` flags. Fields default to a usable prompt
 /// even when a shell omits a flag.
 pub const PromptArgs = struct {
-    duration_ms: u64 = 0,
-    exit_status: u8 = 0,
     shell: Shell = .fish,
     width: u16 = 0,
+    duration_ms: u64 = 0,
+    exit_status: u8 = 0,
 };
 
 /// Error set for flag parsing; the message detail is reported by the caller.
@@ -43,13 +43,11 @@ pub fn parseHistoryAdd(args: []const [:0]const u8) ParseError!HistoryAddArgs {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--")) {
             result.words = args[i + 1 ..];
-
             return result;
         }
 
         if (!std.mem.eql(u8, arg, "--status")) {
             result.words = args[i..];
-
             return result;
         }
 
@@ -98,7 +96,6 @@ pub fn parsePrompt(args: []const [:0]const u8) ParseError!PromptArgs {
 /// is unset (e.g. bash's first prompt has no recorded duration).
 fn parseClamped(comptime T: type, text: []const u8) error{Invalid}!T {
     if (text.len == 0) return 0;
-
     return std.fmt.parseInt(T, text, 10) catch |err| switch (err) {
         error.Overflow => std.math.maxInt(T),
         error.InvalidCharacter => error.Invalid,

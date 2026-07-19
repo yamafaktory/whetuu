@@ -40,7 +40,7 @@ test "default is the star in purple, red on failure" {
 }
 
 test "language dir keeps the star but uses the brand color" {
-    const lang: Lang = .{ .argv = &.{}, .color = .{ .r = 1, .g = 2, .b = 3 }, .icon = "X", .markers = &.{}, .name = "x" };
+    const lang: Lang = .{ .name = "x", .icon = "X", .color = .{ .r = 1, .g = 2, .b = 3 }, .markers = &.{}, .argv = &.{} };
 
     const ok = choose(lang, 0);
     try std.testing.expectEqualStrings(star, ok.text);

@@ -3,10 +3,10 @@
 //!   whetuu prompt [flags]         — render the prompt (called by the shell)
 
 const std = @import("std");
-
 const Allocator = std.mem.Allocator;
-const Context = @import("context.zig").Context;
 const Io = std.Io;
+
+const Env = @import("Env.zig");
 const cli = @import("cli.zig");
 const history = @import("history.zig");
 const init_scripts = @import("init_scripts.zig");
@@ -28,7 +28,6 @@ pub fn main(init: std.process.Init) !void {
     const sub = args[1];
     if (std.mem.eql(u8, sub, "init")) {
         if (args.len < 3) return usage(io);
-
         return init_scripts.write(io, args[2]);
     }
 
@@ -41,6 +40,28 @@ pub fn main(init: std.process.Init) !void {
     }
 
     return usage(io);
+}
+
+/// Builds the `Env` from flags and environment, then renders to stdout.
+fn runPrompt(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: []const [:0]const u8) !void {
+    const opts = try cli.parsePrompt(args);
+
+    var cwd_buf: [max_path_bytes]u8 = undefined;
+    const cwd_len = std.process.currentPath(io, &cwd_buf) catch 0;
+
+    const env: Env = .{
+        .shell = opts.shell,
+        .cwd = cwd_buf[0..cwd_len],
+        .home = environ.get("HOME") orelse "",
+        .width = opts.width,
+        .duration_ms = opts.duration_ms,
+        .exit_status = opts.exit_status,
+    };
+
+    var out_buf: [4096]u8 = undefined;
+    var fw = Io.File.stdout().writer(io, &out_buf);
+    try render.render(io, arena, &env, &fw.interface);
+    try fw.interface.flush();
 }
 
 /// Handles the `history` subcommand: `history add [--status N] -- <command>`
@@ -60,12 +81,10 @@ fn runHistory(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args:
 
         const parts = try arena.alloc([]const u8, opts.words.len);
         for (opts.words, parts) |word, *part| part.* = word;
-
         return history.add(io, arena, path, try std.mem.join(arena, " ", parts), unixNow(io));
     }
 
     const initial = if (args.len >= 2 and std.mem.eql(u8, args[0], "--query")) args[1] else "";
-
     const items = try history.load(io, arena, path);
     const chosen = picker.pick(io, arena, items, initial) orelse return;
 
@@ -73,28 +92,6 @@ fn runHistory(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args:
     var fw = Io.File.stdout().writer(io, &buf);
     try fw.interface.writeAll(chosen);
     try fw.interface.writeByte('\n');
-    try fw.interface.flush();
-}
-
-/// Builds the `Context` from flags and environment, then renders to stdout.
-fn runPrompt(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: []const [:0]const u8) !void {
-    const opts = try cli.parsePrompt(args);
-
-    var cwd_buf: [max_path_bytes]u8 = undefined;
-    const cwd_len = std.process.currentPath(io, &cwd_buf) catch 0;
-
-    const ctx: Context = .{
-        .cwd = cwd_buf[0..cwd_len],
-        .duration_ms = opts.duration_ms,
-        .exit_status = opts.exit_status,
-        .home = environ.get("HOME") orelse "",
-        .shell = opts.shell,
-        .width = opts.width,
-    };
-
-    var out_buf: [4096]u8 = undefined;
-    var fw = Io.File.stdout().writer(io, &out_buf);
-    try render.render(io, arena, &ctx, &fw.interface);
     try fw.interface.flush();
 }
 
@@ -131,8 +128,8 @@ fn usage(io: Io) !void {
 }
 
 test {
+    _ = @import("Env.zig");
     _ = @import("cli.zig");
-    _ = @import("context.zig");
     _ = @import("history.zig");
     _ = @import("init_scripts.zig");
     _ = @import("picker.zig");
