@@ -23,6 +23,10 @@ prompt, the same for everyone. Every module runs concurrently via `std.Io`
 > Font glyphs for the git branch, language logos, and the prompt character.
 > Without one those glyphs show as tofu boxes.
 
+![whetuu in a fish session: the prompt tracking branch, git status and toolchain
+version, then the history picker filtering and running a
+command](docs/demo.gif)
+
 ## Modules
 
 Left to right, each shown only when relevant:

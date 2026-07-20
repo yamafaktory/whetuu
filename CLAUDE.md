@@ -112,6 +112,9 @@ targets, build steps, or publishing flow move.
 - `zig build run -- <args>` — compile and run (e.g. `-- prompt --shell fish --status 0`)
 - `zig build release` — cross-compile + package a tarball per target into
   `zig-out/release/`; `-Dversion=vX.Y.Z` stamps `whetuu --version`
+- `zig build demo` — re-record `docs/demo.cast` and render the README's
+  `docs/demo.gif` (see `RELEASING.md`); run it whenever the prompt or picker
+  changes visibly
 - `zig build bump -- vX.Y.Z` — set `.version` in `build.zig.zon` and nothing else
 - `zig build publish -- vX.Y.Z` — cut a release end to end: bump, commit, push
   `main`, wait for CI on that commit, then tag and push the tag (see

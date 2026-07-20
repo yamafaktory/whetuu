@@ -90,6 +90,33 @@ Adding a target is a one-line edit there; CI cross-compiles the whole list on
 every push, which is what catches a platform-specific regression (a
 `std.os.linux` call, say) before it reaches a release.
 
+## Regenerating the demo
+
+`docs/demo.gif` in the README is rendered from `docs/demo.cast`. Whenever the
+prompt or the picker changes visibly, re-record both:
+
+```sh
+zig build demo
+```
+
+That builds the binary, records a fresh cast, and renders the GIF. Needs
+`python3`, `fish`, [`agg`](https://github.com/asciinema/agg)
+(`cargo install --git https://github.com/asciinema/agg`), and a Nerd Font; it
+refuses to run rather than emitting a GIF full of tofu boxes if any is missing.
+
+- `WHETUU_DEMO_FONT` overrides the font (default `MesloLGS Nerd Font Mono`)
+- `WHETUU_DEMO_FONT_SIZE` overrides the size (default `16`)
+
+Always look at the result before committing. Pacing, colour and glyph coverage
+are exactly what a diff cannot tell you, and a GIF that renders as boxes still
+builds successfully.
+
+`tools/record-demo.py` drives a real fish session in a throwaway repo, so the
+output is genuine — only the keystrokes and their timing are scripted. Edit that
+file to change what the demo does. It uses fish because the up-arrow picker
+binding ships only in the fish integration; a bash recording would silently show
+plain shell history instead of the picker.
+
 ## macOS artifacts are unsigned
 
 Nothing in the pipeline code-signs or notarizes the Mach-O builds, so a user who

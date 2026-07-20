@@ -62,6 +62,15 @@ pub fn build(b: *std.Build) void {
         release_step.dependOn(&install.step);
     }
 
+    // Re-records the README's demo. Depends on the installed binary so it always
+    // captures the current prompt rather than a stale zig-out.
+    const demo_step = b.step("demo", "Re-record docs/demo.cast and render docs/demo.gif");
+    const demo = b.addSystemCommand(&.{"bash"});
+    demo.addFileArg(b.path("tools/demo.sh"));
+    demo.stdio = .inherit;
+    demo.step.dependOn(b.getInstallStep());
+    demo_step.dependOn(&demo.step);
+
     // The version comes from `zig build publish -- v0.1.0` rather than
     // -Dversion, which stays reserved for stamping a local `release` build.
     const bump_step = b.step("bump", "Set the version in build.zig.zon (zig build bump -- vX.Y.Z)");
