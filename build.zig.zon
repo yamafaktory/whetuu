@@ -1,6 +1,6 @@
 .{
     .name = .whetuu,
-    .version = "0.1.0",
+    .version = "0.1.1",
     .fingerprint = 0x23806febc76f8b35,
     .minimum_zig_version = "0.17.0-dev.1422+e863bf3be",
     .dependencies = .{},
