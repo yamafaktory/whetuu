@@ -106,6 +106,7 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
     var scope = initialScope(items, opts.cwd);
     var selected: usize = 0;
     var base: usize = 0;
+    var input: Input = .{};
 
     while (true) {
         _ = frame_arena.reset(.retain_capacity);
@@ -118,7 +119,7 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
         const bar = scopeBar(scratch, scope, opts.cwd, opts.home, term.cols / 3) catch null;
         render(io, scratch, tty, query.items, shown, selected, &base, term, now, bar);
 
-        switch (readKey(fd)) {
+        switch (input.next(fd)) {
             .up => {
                 if (selected + 1 < shown.len) selected += 1;
             },
@@ -276,34 +277,147 @@ fn enterRaw(fd: posix.fd_t, original: posix.termios) !void {
     try posix.tcsetattr(fd, .FLUSH, raw);
 }
 
-/// Reads one keypress, decoding the escape sequences for the arrow keys. A
-/// read that comes back empty is the VTIME timeout elapsing, reported as a
-/// `.tick` so the caller redraws with fresh entry ages.
-fn readKey(fd: posix.fd_t) Key {
-    var buf: [8]u8 = undefined;
-    const n = posix.read(fd, &buf) catch return .cancel;
-    if (n == 0) return .tick;
+/// One decoded key and how many input bytes it consumed.
+const Decoded = struct {
+    key: Key,
+    len: usize,
+};
 
-    if (buf[0] == 0x1b) {
-        if (n >= 3 and buf[1] == '[') {
-            return switch (buf[2]) {
-                'A' => .up,
-                'B' => .down,
-                else => .other,
+/// Decodes the first key in `bytes`. Assumes `bytes` is non-empty. Kept pure and
+/// separate from the read so a pasted run decodes exactly like the same bytes
+/// typed one at a time.
+fn decodeKey(bytes: []const u8) Decoded {
+    if (bytes[0] == 0x1b) {
+        if (bytes.len >= 3 and bytes[1] == '[') {
+            return .{
+                .key = switch (bytes[2]) {
+                    'A' => .up,
+                    'B' => .down,
+                    else => .other,
+                },
+                .len = 3,
             };
         }
 
-        return .cancel;
+        return .{ .key = .cancel, .len = 1 };
     }
 
-    return switch (buf[0]) {
+    const key: Key = switch (bytes[0]) {
         '\r', '\n' => .enter,
         '\t' => .tab,
         0x07 => .scope, // Ctrl+G
         0x7f, 0x08 => .backspace,
         0x03, 0x04 => .cancel,
-        else => if (buf[0] >= 0x20 and buf[0] < 0x7f) Key{ .char = buf[0] } else .other,
+        else => if (bytes[0] >= 0x20 and bytes[0] < 0x7f) Key{ .char = bytes[0] } else .other,
     };
+    return .{ .key = key, .len = 1 };
+}
+
+/// Buffers terminal input. A paste arrives as one burst rather than a byte per
+/// read, so keys are handed out one at a time from the buffer and the next read
+/// only happens once it is drained — otherwise every byte after the first in a
+/// burst is silently dropped.
+const Input = struct {
+    buf: [1024]u8 = undefined,
+    len: usize = 0,
+    pos: usize = 0,
+
+    /// Reads one keypress, decoding the escape sequences for the arrow keys. A
+    /// read that comes back empty is the VTIME timeout elapsing, reported as a
+    /// `.tick` so the caller redraws with fresh entry ages.
+    fn next(in: *Input, fd: posix.fd_t) Key {
+        if (in.buffered()) |key| return key;
+
+        in.pos = 0;
+        in.len = posix.read(fd, &in.buf) catch return .cancel;
+        if (in.len == 0) return .tick;
+
+        return in.buffered() orelse .tick;
+    }
+
+    /// The next key already sitting in the buffer, or null once it is drained.
+    fn buffered(in: *Input) ?Key {
+        if (in.pos == in.len) return null;
+        const decoded = decodeKey(in.buf[in.pos..in.len]);
+        in.pos += decoded.len;
+        return decoded.key;
+    }
+
+    /// Fills the buffer as a read would, for tests.
+    fn seed(in: *Input, bytes: []const u8) void {
+        @memcpy(in.buf[0..bytes.len], bytes);
+        in.len = bytes.len;
+        in.pos = 0;
+    }
+};
+
+test "a pasted burst yields every character, not just the first of each read" {
+    var input: Input = .{};
+    input.seed("--version");
+
+    var typed: std.ArrayList(u8) = .empty;
+    defer typed.deinit(std.testing.allocator);
+
+    while (input.buffered()) |key| {
+        switch (key) {
+            .char => |c| try typed.append(std.testing.allocator, c),
+            else => return error.UnexpectedKey,
+        }
+    }
+
+    try std.testing.expectEqualStrings("--version", typed.items);
+}
+
+test "every character of a pasted run is decoded" {
+    var typed: std.ArrayList(u8) = .empty;
+    defer typed.deinit(std.testing.allocator);
+
+    const pasted = "--version";
+    var i: usize = 0;
+    while (i < pasted.len) {
+        const decoded = decodeKey(pasted[i..]);
+        switch (decoded.key) {
+            .char => |c| try typed.append(std.testing.allocator, c),
+            else => return error.UnexpectedKey,
+        }
+        i += decoded.len;
+    }
+
+    try std.testing.expectEqualStrings(pasted, typed.items);
+}
+
+test "an arrow escape consumes the whole sequence" {
+    const up = decodeKey("\x1b[A");
+    try std.testing.expect(std.meta.activeTag(up.key) == .up);
+    try std.testing.expectEqual(@as(usize, 3), up.len);
+
+    const down = decodeKey("\x1b[B");
+    try std.testing.expect(std.meta.activeTag(down.key) == .down);
+    try std.testing.expectEqual(@as(usize, 3), down.len);
+
+    const escape = decodeKey("\x1b");
+    try std.testing.expect(std.meta.activeTag(escape.key) == .cancel);
+    try std.testing.expectEqual(@as(usize, 1), escape.len);
+}
+
+test "a burst mixing text and control keys decodes in order" {
+    const bytes = "ab\t\x1b[A\r";
+    var keys: std.ArrayList(Key) = .empty;
+    defer keys.deinit(std.testing.allocator);
+
+    var i: usize = 0;
+    while (i < bytes.len) {
+        const decoded = decodeKey(bytes[i..]);
+        try keys.append(std.testing.allocator, decoded.key);
+        i += decoded.len;
+    }
+
+    try std.testing.expectEqual(@as(usize, 5), keys.items.len);
+    try std.testing.expectEqual(@as(u8, 'a'), keys.items[0].char);
+    try std.testing.expectEqual(@as(u8, 'b'), keys.items[1].char);
+    try std.testing.expect(std.meta.activeTag(keys.items[2]) == .tab);
+    try std.testing.expect(std.meta.activeTag(keys.items[3]) == .up);
+    try std.testing.expect(std.meta.activeTag(keys.items[4]) == .enter);
 }
 
 /// Draws the whole frame in one write. `base` is the newest index currently
