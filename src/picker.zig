@@ -13,7 +13,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
-const linux = std.os.linux;
 const posix = std.posix;
 
 const Entry = @import("history.zig").Entry;
@@ -91,14 +90,15 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
     if (items.len == 0) return null;
 
     const fd = posix.openat(posix.AT.FDCWD, "/dev/tty", .{ .ACCMODE = .RDWR }, 0) catch return null;
-    defer _ = linux.close(fd);
+    const tty: Io.File = .{ .handle = fd, .flags = .{ .nonblocking = false } };
+    defer tty.close(io);
 
     const original = posix.tcgetattr(fd) catch return null;
     enterRaw(fd, original) catch return null;
     defer posix.tcsetattr(fd, .FLUSH, original) catch {};
 
-    writeAll(fd, "\x1b[?1049h");
-    defer writeAll(fd, "\x1b[?1049l");
+    writeAll(io, tty, "\x1b[?1049h");
+    defer writeAll(io, tty, "\x1b[?1049l");
 
     var frame_arena: std.heap.ArenaAllocator = .init(arena);
     var query: std.ArrayList(u8) = .empty;
@@ -111,12 +111,12 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
         _ = frame_arena.reset(.retain_capacity);
         const scratch = frame_arena.allocator();
         const now = Io.Clock.now(.real, io).toSeconds();
-        const term = size(fd);
+        const term = size(io, tty);
         const shown = filter(scratch, items, query.items, scope, opts.cwd) catch items;
         if (selected >= shown.len) selected = if (shown.len == 0) 0 else shown.len - 1;
 
         const bar = scopeBar(scratch, scope, opts.cwd, opts.home, term.cols / 3) catch null;
-        render(scratch, fd, query.items, shown, selected, &base, term, now, bar);
+        render(io, scratch, tty, query.items, shown, selected, &base, term, now, bar);
 
         switch (readKey(fd)) {
             .up => {
@@ -309,14 +309,14 @@ fn readKey(fd: posix.fd_t) Key {
 /// Draws the whole frame in one write. `base` is the newest index currently
 /// visible (the bottom list row), carried across frames so the viewport scrolls
 /// while keeping the selection on screen.
-fn render(arena: Allocator, fd: posix.fd_t, query: []const u8, shown: []const Entry, selected: usize, base: *usize, term: Size, now: i64, bar: ?ScopeBar) void {
+fn render(io: Io, arena: Allocator, tty: Io.File, query: []const u8, shown: []const Entry, selected: usize, base: *usize, term: Size, now: i64, bar: ?ScopeBar) void {
     const list_rows: usize = if (term.rows > 2) term.rows - 2 else 1;
     if (selected < base.*) base.* = selected;
     if (selected >= base.* + list_rows) base.* = selected + 1 - list_rows;
 
     var f: std.ArrayList(u8) = .empty;
     frame(arena, &f, query, shown, selected, base.*, list_rows, term.cols, now, bar) catch return;
-    writeAll(fd, f.items);
+    writeAll(io, tty, f.items);
 }
 
 /// Builds the frame bytes into `f`. Split from `render` so a formatting failure
@@ -424,23 +424,23 @@ fn truncate(line: []const u8, cols: usize) []const u8 {
 
 /// Queries the terminal size, falling back to 24x80 when the ioctl is
 /// unavailable (e.g. the tty is a pipe).
-fn size(fd: posix.fd_t) Size {
-    var ws: posix.winsize = undefined;
-    const rc = std.os.linux.ioctl(fd, posix.T.IOCGWINSZ, @intFromPtr(&ws));
-    if (@as(isize, @bitCast(rc)) < 0 or ws.row == 0) return .{ .cols = 80, .rows = 24 };
+fn size(io: Io, tty: Io.File) Size {
+    const fallback: Size = .{ .cols = 80, .rows = 24 };
+    var ws: posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
+    const result = io.operate(.{ .device_io_control = .{
+        .file = tty,
+        .code = posix.T.IOCGWINSZ,
+        .arg = &ws,
+    } }) catch return fallback;
+    if (result.device_io_control < 0 or ws.row == 0) return fallback;
     return .{ .cols = if (ws.col == 0) 80 else ws.col, .rows = ws.row };
 }
 
-/// Writes all of `bytes` to `fd`, retrying short writes and dropping the rest on
-/// error (a broken tty is not worth aborting the whole picker over).
-fn writeAll(fd: posix.fd_t, bytes: []const u8) void {
-    var i: usize = 0;
-    while (i < bytes.len) {
-        const rc = linux.write(fd, bytes[i..].ptr, bytes.len - i);
-        const written: isize = @bitCast(rc);
-        if (written <= 0) return;
-        i += @intCast(written);
-    }
+/// Writes all of `bytes` to `fd`, dropping them on error (a broken tty is not
+/// worth aborting the whole picker over). Short writes are retried by
+/// `writeStreamingAll`.
+fn writeAll(io: Io, tty: Io.File, bytes: []const u8) void {
+    tty.writeStreamingAll(io, bytes) catch {};
 }
 
 test "matches requires every query token" {

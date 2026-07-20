@@ -5,7 +5,6 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const linux = std.os.linux;
 const posix = std.posix;
 
 const Env = @import("Env.zig");
@@ -15,7 +14,7 @@ const style = @import("style.zig");
 /// Renders `user@host`, or null on a local, non-root shell. Root turns the
 /// whole segment red whether local or remote.
 pub fn run(arena: Allocator, env: *const Env) ?[]const Span {
-    const root = linux.getuid() == 0;
+    const root = posix.system.getuid() == 0;
     if (!env.ssh and !root) return null;
 
     var buf: [posix.HOST_NAME_MAX]u8 = undefined;
@@ -43,7 +42,7 @@ test "hidden on a local, non-root shell" {
         .duration_ms = 0,
         .exit_status = 0,
     };
-    try std.testing.expect(run(std.testing.allocator, &env) == null or linux.getuid() == 0);
+    try std.testing.expect(run(std.testing.allocator, &env) == null or posix.system.getuid() == 0);
 }
 
 test "shown over ssh with user and host joined by @" {

@@ -4,6 +4,10 @@
 `nf-md-star_face`) is the default prompt character. The binary is installed as
 the ASCII command `whetuu`.
 
+Pronounced **FEH-too** (`/ˈfɛ.tuː/`) — stress the first syllable. In Māori `wh`
+is an *f* sound, not a *w*, and the macron in `ū` makes that vowel long, which
+is why the ASCII spelling doubles it: `whetuu`.
+
 An opinionated, **zero-config** cross-shell prompt written in Zig 0.17.
 
 There is nothing to configure: a single compiled binary renders one curated
@@ -30,17 +34,69 @@ Left to right, each shown only when relevant:
 | `cmd_duration`| Timer glyph + `<time>` when the last command ran ≥ 2 s                      |
 | `character`   | A star, purple by default or in the project's language brand color — forced red after a failed command |
 
-## Build
+## Install
 
-Requires Zig 0.17 (dev).
+Prebuilt binaries are published on the
+[releases page](https://github.com/yamafaktory/whetuu/releases) for:
+
+| Platform | Target |
+|---|---|
+| Linux x86-64 | `x86_64-linux-musl` (static, no runtime dependencies) |
+| Linux ARM64 | `aarch64-linux-musl` (static, no runtime dependencies) |
+| macOS Apple Silicon | `aarch64-macos` |
+| macOS Intel | `x86_64-macos` |
+
+Download the tarball for your platform, unpack it, and move the binary to any
+directory on your `PATH`:
 
 ```sh
-zig build              # binary at ./zig-out/bin/whetuu
-zig build test         # run the unit tests
-zig build check        # type-check only
+tar -xzf whetuu-<version>-<target>.tar.gz
+sudo mv whetuu /usr/local/bin/
 ```
 
-Put `whetuu` on your `PATH` (e.g. copy `zig-out/bin/whetuu` somewhere on it).
+Each release also ships a `SHA256SUMS` file if you want to verify the download.
+
+> **macOS: the binaries are unsigned.** If you download the tarball in a
+> browser, Gatekeeper quarantines it and the first run fails with *"cannot be
+> opened because the developer cannot be verified"*. Clear the flag once:
+>
+> ```sh
+> xattr -d com.apple.quarantine "$(command -v whetuu)"
+> ```
+>
+> Downloading with `curl` or `wget` avoids the quarantine attribute entirely.
+
+Check it worked — `whetuu` with no arguments prints the command list:
+
+```sh
+whetuu
+whetuu --version
+```
+
+Then wire it into your shell — see [Shell setup](#shell-setup).
+
+### From source
+
+Needs Zig 0.17 (dev) — see `minimum_zig_version` in `build.zig.zon` for the
+exact nightly.
+
+```sh
+git clone https://github.com/yamafaktory/whetuu.git
+cd whetuu
+zig build -Doptimize=ReleaseFast
+sudo mv zig-out/bin/whetuu /usr/local/bin/
+```
+
+Other build steps:
+
+```sh
+zig build test         # run the unit tests
+zig build check        # type-check only
+zig build fmt          # format all source files
+zig build run          # build and run without installing
+```
+
+Maintainers: see [`RELEASING.md`](RELEASING.md) for cutting a release.
 
 ## Shell setup
 
@@ -65,10 +121,30 @@ eval "$(whetuu init zsh)"
 `whetuu prompt …` on every prompt, passing the last exit status, command
 duration, and terminal width.
 
+## Usage
+
+Day to day there is nothing to run: the shell hook drives everything, and the
+only command you invoke by hand is the history picker (bound to **up-arrow**
+under fish). The full command surface:
+
+| Command | Does |
+|---|---|
+| `whetuu` | Print the command list |
+| `whetuu --version` | Print the version |
+| `whetuu init <fish\|bash\|zsh>` | Print the shell integration script — meant to be `source`d / `eval`ed |
+| `whetuu prompt` | Render one prompt; called by the shell hook, not by you |
+| `whetuu history` | Open the interactive history picker |
+| `whetuu history add -- <command>` | Record a finished command; called by the shell hook |
+
+`prompt` and `history add` take flags that only the init scripts pass (exit
+status, duration, width), which is why they're omitted here.
+
 ## History
 
 whetuu keeps its own command history — a single, deduplicated, cross-shell
 store at `$XDG_DATA_HOME/whetuu/history` (or `~/.local/share/whetuu/history`).
+macOS uses that same XDG path rather than `~/Library`, so the store stays put
+when a dotfiles setup is shared across machines.
 Commands are recorded after they finish and only when they exited with status
 0, so typos and failed runs never clutter the picker. Each command is recorded
 together with the directory it ran in.

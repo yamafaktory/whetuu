@@ -100,8 +100,20 @@ with personal habit, Zig wins.
    the same change; also fix any statement the change has made stale. Only
    purely internal refactors leave the README untouched.
 
+`README.md` is for users; it covers installing, shell setup, the commands, and
+the history picker. Release and maintenance workflow lives in `RELEASING.md` —
+keep it out of the README, and reconcile it in the same change when the release
+targets, build steps, or publishing flow move.
+
 ## Build steps
 
 - `zig build` — compile
 - `zig build check` — type-check without producing an artifact
 - `zig build run -- <args>` — compile and run (e.g. `-- prompt --shell fish --status 0`)
+- `zig build release` — cross-compile + package a tarball per target into
+  `zig-out/release/`; `-Dversion=vX.Y.Z` stamps `whetuu --version`
+- `zig build publish -Dversion=vX.Y.Z` — tag and push, triggering the release
+  workflow (see `RELEASING.md`)
+
+The published target list lives in `release_targets` in `build.zig`, and both CI
+workflows call `zig build release`, so it is the only place a target is named.

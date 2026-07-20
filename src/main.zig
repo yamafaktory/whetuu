@@ -1,10 +1,14 @@
-//! whetuu entry point. Two subcommands:
+//! whetuu entry point. Three subcommands:
 //!   whetuu init <fish|bash|zsh>   — print the shell integration script
 //!   whetuu prompt [flags]         — render the prompt (called by the shell)
+//!   whetuu history [add ...]      — open the history picker, or record a command
+//! plus `whetuu --version`.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+
+const build_options = @import("build_options");
 
 const Env = @import("Env.zig");
 const cli = @import("cli.zig");
@@ -26,6 +30,10 @@ pub fn main(init: std.process.Init) !void {
     if (args.len < 2) return usage(io);
 
     const sub = args[1];
+    if (std.mem.eql(u8, sub, "--version") or std.mem.eql(u8, sub, "-v")) {
+        return writeVersion(io);
+    }
+
     if (std.mem.eql(u8, sub, "init")) {
         if (args.len < 3) return usage(io);
         return init_scripts.write(io, args[2]);
@@ -127,11 +135,22 @@ fn usage(io: Io) !void {
         "  " ++ purple ++ "init" ++ reset ++ " <fish|bash|zsh>   " ++ dim ++ "Print the shell integration script" ++ reset ++ "\n" ++
         "  " ++ purple ++ "prompt" ++ reset ++ "                 " ++ dim ++ "Render the prompt (called by the shell)" ++ reset ++ "\n" ++
         "  " ++ purple ++ "history" ++ reset ++ "                " ++ dim ++ "Open the interactive history picker" ++ reset ++ "\n" ++
-        "  " ++ purple ++ "history add" ++ reset ++ "            " ++ dim ++ "Record a finished command (status 0 only)" ++ reset ++ "\n";
+        "  " ++ purple ++ "history add" ++ reset ++ "            " ++ dim ++ "Record a finished command (status 0 only)" ++ reset ++ "\n" ++
+        "  " ++ purple ++ "--version" ++ reset ++ "              " ++ dim ++ "Print the version" ++ reset ++ "\n";
 
     var buf: [256]u8 = undefined;
     var fw = Io.File.stderr().writer(io, &buf);
     try fw.interface.writeAll(text);
+    try fw.interface.flush();
+}
+
+/// Prints the version to stdout, so `whetuu --version` stays pipeable while the
+/// help above goes to stderr.
+fn writeVersion(io: Io) !void {
+    var buf: [64]u8 = undefined;
+    var fw = Io.File.stdout().writer(io, &buf);
+    try fw.interface.writeAll(build_options.version);
+    try fw.interface.writeByte('\n');
     try fw.interface.flush();
 }
 
