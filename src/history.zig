@@ -31,7 +31,13 @@ pub const Entry = struct {
 /// recorded as unknown. An advisory exclusive lock serializes concurrent
 /// writers from other shells so appends from two terminals can never
 /// interleave into one corrupt line.
+///
+/// A command that starts with a space or tab is not recorded at all — the
+/// long-standing shell convention for "keep this one out of history", and the
+/// only way to keep a secret typed on the command line out of the store.
 pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd: []const u8, now: i64) !void {
+    if (isIgnored(command)) return;
+
     const trimmed = std.mem.trim(u8, command, " \t\r\n");
     if (trimmed.len == 0) return;
 
@@ -81,6 +87,21 @@ pub fn storePath(arena: Allocator, xdg_data_home: []const u8, home: []const u8) 
     if (xdg_data_home.len > 0) return try std.fmt.allocPrint(arena, "{s}/whetuu/history", .{xdg_data_home});
     if (home.len > 0) return try std.fmt.allocPrint(arena, "{s}/.local/share/whetuu/history", .{home});
     return null;
+}
+
+/// True when the command opts out of being recorded by starting with a space or
+/// tab. Checked before any trimming, which would otherwise erase the marker.
+fn isIgnored(command: []const u8) bool {
+    return command.len > 0 and (command[0] == ' ' or command[0] == '\t');
+}
+
+test "a leading space keeps a command out of the store" {
+    try std.testing.expect(isIgnored(" curl -H 'Authorization: Bearer sk-secret' https://api"));
+    try std.testing.expect(isIgnored("\tsecret"));
+    try std.testing.expect(!isIgnored("git status"));
+    try std.testing.expect(!isIgnored(""));
+    // Trailing whitespace is not an opt-out; only the first byte counts.
+    try std.testing.expect(!isIgnored("git status "));
 }
 
 /// Splits raw file bytes into unique (directory, command) entries, most-recent

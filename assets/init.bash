@@ -12,6 +12,16 @@ __whetuu_preexec() {
 }
 trap '__whetuu_preexec' DEBUG
 
+# A leading space means "do not record this", but bash's `history` output cannot
+# preserve it — the command is read back with its indentation already gone. So
+# the opt-out is delegated to bash itself: with `ignorespace` such a command
+# never enters bash's history, so it never reaches the recorder below either.
+# Any existing HISTCONTROL setting is kept.
+case ":$HISTCONTROL:" in
+    *:ignorespace:* | *:ignoreboth:*) ;;
+    *) HISTCONTROL="${HISTCONTROL:+$HISTCONTROL:}ignorespace" ;;
+esac
+
 # Seed with the newest entry of the loaded history file so it is not recorded
 # as if it had just run when the first prompt draws.
 __whetuu_last_hist=""

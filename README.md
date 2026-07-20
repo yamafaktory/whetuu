@@ -84,6 +84,53 @@ turning on its untracked cache cut `git status` from 13.5 ms to 5.7 ms on an
 git config core.untrackedCache true
 ```
 
+## Security
+
+whetuu is a small binary that reads your repository and prints a line. What that
+does and does not involve:
+
+- **No network access.** There is no socket, HTTP, or DNS code in the binary, and
+  no telemetry or update check.
+- **No config file**, so no config parser and nothing in your dotfiles for
+  another tool to write to. The only files written are the history store and a
+  version cache at `~/.cache/whetuu/versions` (or under `$XDG_CACHE_HOME`),
+  which holds nothing but toolchain version strings and is safe to delete at
+  any time.
+- **Two subprocesses, both bounded**: `git status --porcelain=2 --branch -z`, and
+  the detected toolchain's version command (`zig version`, `node --version`, …).
+  Nothing else is executed.
+- **The history store is `0600`**, re-asserted on every append, because command
+  lines routinely contain paths and secrets. It lives at
+  `~/.local/share/whetuu/history` — or under `$XDG_DATA_HOME` when that is set,
+  which it usually is not, on macOS or Linux.
+- **A leading space keeps a command out of the store**, the same convention
+  shells have used for decades:
+
+  ```sh
+   curl -H "Authorization: Bearer $TOKEN" https://api.example.com
+  ```
+
+  This works in fish, zsh and bash. bash needs help — its `history` output has
+  already lost the indentation by the time whetuu sees it — so the bash
+  integration adds `ignorespace` to your `HISTCONTROL`, keeping any value you
+  had. The command then stays out of bash's history too.
+
+- **Otherwise, command lines are stored in plaintext.** A token pasted into a
+  `curl` you *didn't* prefix with a space is written to that file verbatim if
+  the command succeeds. File permissions are the only protection; there is no
+  redaction. Prefer environment variables or a credentials file for secrets, as
+  you would with your shell's own history.
+
+  (Only commands that exited `0` are stored, but treat that as noise reduction
+  for the picker, not a safeguard — it filters out your typos, not your
+  successful `curl`.)
+
+One thing to be aware of: the language module decides *which* toolchain to probe
+from files in the current directory, so `cd`-ing into an untrusted repository can
+cause whetuu to run, say, `node --version`. It executes the binary your `PATH`
+resolves, never one from the repository — but if you keep `.` in your `PATH`,
+that distinction disappears, and it disappears for every other tool you run too.
+
 ## Install
 
 Prebuilt binaries are published on the
@@ -196,8 +243,9 @@ store at `~/.local/share/whetuu/history`, or `$XDG_DATA_HOME/whetuu/history`
 when that variable is set. macOS uses the same path rather than `~/Library`, so
 the store stays put when a dotfiles setup is shared across machines.
 Commands are recorded after they finish and only when they exited with status
-0, so typos and failed runs never clutter the picker. Each command is recorded
-together with the directory it ran in.
+0, so typos and failed runs never clutter the picker. Prefixing a command with a
+space keeps it out of the store entirely. Each command is recorded together with
+the directory it ran in.
 The fish integration records every command there and binds **up-arrow** to an
 interactive picker; anything already typed on the command line carries over
 into the picker's search field. The picker opens scoped to the **current
