@@ -4,7 +4,7 @@
 [![version](https://img.shields.io/github/v/release/yamafaktory/whetuu?sort=semver&display_name=tag&label=version)](https://github.com/yamafaktory/whetuu/releases/latest)
 [![license](https://img.shields.io/github/license/yamafaktory/whetuu)](LICENSE)
 
-A shell prompt for fish, bash and zsh, written in Zig 0.17.
+An opinionated, zero-config cross-shell prompt written in Zig.
 
 *whetū* is Māori for "star". A star is the default prompt character, using the
 Nerd Font glyph `nf-md-star_face`. The binary is installed as `whetuu`.

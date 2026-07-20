@@ -112,10 +112,13 @@ by someone deciding whether to use whetuu, so it has to be plain.
 
 - Short, simple sentences. One idea each.
 - **No semicolons.** Split the sentence, or use a full stop.
-- **No hyphenated compounds** in prose: write "no configuration" rather than
-  "zero-config", "works across shells" rather than "cross-shell", "type check"
-  rather than "type-check". This does not apply to code, flags, file names or
-  target triples (`--duration-ms`, `x86_64-linux-musl`, `zig-out`).
+- **No hyphenated compounds** in prose: write "works across shells" rather than
+  "cross-shell", "type check" rather than "type-check". This does not apply to
+  code, flags, file names or target triples (`--duration-ms`,
+  `x86_64-linux-musl`, `zig-out`).
+- One exception: the README's opening line, *"An opinionated, zero-config
+  cross-shell prompt written in Zig"*. It is the project's tagline and reads
+  better as it is. Leave it alone.
 - Prefer a full stop to a dash when joining two thoughts.
 - Say the thing, then explain it. Do not build up to the point.
 
