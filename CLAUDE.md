@@ -100,10 +100,24 @@ with personal habit, Zig wins.
    the same change; also fix any statement the change has made stale. Only
    purely internal refactors leave the README untouched.
 
-`README.md` is for users; it covers installing, shell setup, the commands, and
-the history picker. Release and maintenance workflow lives in `RELEASING.md` —
-keep it out of the README, and reconcile it in the same change when the release
-targets, build steps, or publishing flow move.
+`README.md` is for users. It covers installing, shell setup, the commands, and
+the history picker. Release and maintenance workflow lives in `RELEASING.md`.
+Keep that out of the README, and reconcile it in the same change when the
+release targets, build steps, or publishing flow move.
+
+## Prose style
+
+Applies to `README.md`, `RELEASING.md` and this file. Documentation is read once
+by someone deciding whether to use whetuu, so it has to be plain.
+
+- Short, simple sentences. One idea each.
+- **No semicolons.** Split the sentence, or use a full stop.
+- **No hyphenated compounds** in prose: write "no configuration" rather than
+  "zero-config", "works across shells" rather than "cross-shell", "type check"
+  rather than "type-check". This does not apply to code, flags, file names or
+  target triples (`--duration-ms`, `x86_64-linux-musl`, `zig-out`).
+- Prefer a full stop to a dash when joining two thoughts.
+- Say the thing, then explain it. Do not build up to the point.
 
 ## Build steps
 

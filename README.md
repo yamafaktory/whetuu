@@ -4,29 +4,25 @@
 [![version](https://img.shields.io/github/v/release/yamafaktory/whetuu?sort=semver&display_name=tag&label=version)](https://github.com/yamafaktory/whetuu/releases/latest)
 [![license](https://img.shields.io/github/license/yamafaktory/whetuu)](LICENSE)
 
-*whetū* is Māori for "star" — fitting, since a star (the Nerd Font glyph
-`nf-md-star_face`) is the default prompt character. The binary is installed as
-the ASCII command `whetuu`.
+A shell prompt for fish, bash and zsh, written in Zig 0.17.
 
-Pronounced **FEH-too** (`/ˈfɛ.tuː/`) — stress the first syllable. In Māori `wh`
-is an *f* sound, not a *w*, and the macron in `ū` makes that vowel long, which
-is why the ASCII spelling doubles it: `whetuu`.
+*whetū* is Māori for "star". A star is the default prompt character, using the
+Nerd Font glyph `nf-md-star_face`. The binary is installed as `whetuu`.
 
-An opinionated, **zero-config** cross-shell prompt written in Zig 0.17.
+Pronounced **FEH-too** (`/ˈfɛ.tuː/`). Stress the first syllable. In Māori `wh`
+is an *f* sound, not a *w*. The macron in `ū` makes that vowel long, which is
+why the ASCII spelling doubles it.
 
-There is nothing to configure: a single compiled binary renders one curated
-prompt, the same for everyone. Every module runs concurrently via `std.Io`
-(`Io.async` → `Future`, backed by `Io.Threaded`), so a render costs about what
-its *slowest* probe costs rather than the sum of all of them — see
-[Performance](#performance).
+There is nothing to configure. One compiled binary renders one curated prompt,
+the same for everyone. Every module runs at the same time via `std.Io`, so a
+render costs about what its slowest probe costs. See [Performance](#performance).
 
 > **Requires a [Nerd Font](https://www.nerdfonts.com/).** The prompt uses Nerd
 > Font glyphs for the git branch, language logos, and the prompt character.
 > Without one those glyphs show as tofu boxes.
 
-![a terminal session: the prompt tracking branch, git status and toolchain
-version, then the history picker filtering and running a
-command](docs/demo.gif)
+![A terminal session. The prompt tracks the branch, git status and toolchain
+version. The history picker then filters and runs a command](docs/demo.gif)
 
 ## Modules
 
@@ -34,34 +30,35 @@ Left to right, each shown only when relevant:
 
 | Module        | Shows                                                                       |
 |---------------|-----------------------------------------------------------------------------|
-| `user_host`   | `user@host` in bold green — only over SSH (`$SSH_CONNECTION`/`$SSH_TTY`) or when root (then bold red as a warning) |
-| `directory`   | Current directory, `$HOME` collapsed to `~`; keeps the anchor + as many trailing dirs as fit the width (`~/…/projects/client`) |
-| `git` branch  | Branch glyph + current branch (or `(detached)`), in magenta                 |
-| `git` state   | In-progress operation in yellow while one is underway: `(rebasing 2/7)`, `(merging)`, `(cherry-picking)`, `(reverting)`, `(bisecting)` — read straight from `.git`, no extra subprocess |
+| `user_host`   | `user@host` in bold green, only over SSH (`$SSH_CONNECTION`/`$SSH_TTY`) or when root, and then in bold red as a warning |
+| `directory`   | Current directory, with `$HOME` collapsed to `~`. Keeps the anchor plus as many trailing directories as fit the width (`~/…/projects/client`) |
+| `git` branch  | Branch glyph and current branch (or `(detached)`), in magenta               |
+| `git` state   | Any operation underway, in yellow: `(rebasing 2/7)`, `(merging)`, `(cherry-picking)`, `(reverting)`, `(bisecting)`. Read straight from `.git`, with no extra subprocess |
 | `git` status  | `[=conflicts $stashes +staged !modified ?untracked ⇡ahead ⇣behind]`         |
-| `language`    | Logo + toolchain version in the brand color — 39 languages & tools, detected from a project manifest (`Cargo.toml`, `mix.exs`, …), a source-file extension (`*.odin`, `*.rkt`, …), or an infra marker (`flake.nix`, `Dockerfile`, `*.tf` for Terraform/OpenTofu) |
-| `cmd_duration`| Timer glyph + `<time>` when the last command ran ≥ 2 s                      |
-| `character`   | A star, purple by default or in the project's language brand color — forced red after a failed command |
+| `language`    | Logo and toolchain version in the brand color, for 39 languages and tools. Detected from a project manifest (`Cargo.toml`, `mix.exs`, …), a source file extension (`*.odin`, `*.rkt`, …), or an infra marker (`flake.nix`, `Dockerfile`, `*.tf` for Terraform and OpenTofu) |
+| `cmd_duration`| Timer glyph and `<time>` when the last command ran for 2 s or more          |
+| `character`   | A star, purple by default, or in the language brand color. Turns red after a failed command |
 
 ## Performance
 
-A prompt runs before every command, so its cost is paid constantly. Numbers from
-`hyperfine --warmup 40 --runs 400` on a 13th-gen i9-13900H, ReleaseFast build,
+A prompt runs before every command, so you pay its cost constantly. Numbers from
+`hyperfine --warmup 40 --runs 400` on a 13th gen i9-13900H, ReleaseFast build,
 with the toolchain version cache warm:
 
 | Directory | Render | For comparison |
 |---|---|---|
 | No repo, no toolchain | **3.7 ms** ± 1.0 | — |
-| 33-file Zig repo | **6.2 ms** ± 3.1 | `zig version` alone: 8.5 ms |
-| 8,079-file monorepo | **33.2 ms** ± 7.5 | `git status` alone: 32.6 ms |
+| Zig repo, 33 files | **6.2 ms** ± 3.1 | `zig version` alone: 8.5 ms |
+| Monorepo, 8079 files | **33.2 ms** ± 7.5 | `git status` alone: 32.6 ms |
 
-Two things do most of the work there. Modules overlap, so a render costs about
-what its slowest probe costs rather than their sum — in the monorepo the whole
-prompt is indistinguishable from `git status` on its own. And toolchain versions
-are cached (keyed on the binary's path, mtime and size), so the Zig repo renders
-in *less* time than one `zig version` call takes: the first prompt in a project
-pays for the probe, later ones read a small file instead. Upgrading a toolchain
-changes its mtime, which invalidates the entry on its own.
+Two things do most of the work. Modules overlap, so a render costs about what
+its slowest probe costs rather than the sum of all of them. In the monorepo the
+whole prompt takes about as long as `git status` on its own.
+
+Toolchain versions are also cached, keyed on the binary path, mtime and size.
+That is why the Zig repo renders faster than a single `zig version` call. The
+first prompt in a project pays for the probe. Later ones read a small file
+instead. Upgrading a toolchain changes its mtime, which drops the stale entry.
 
 Reproduce it with:
 
@@ -70,15 +67,16 @@ hyperfine --warmup 40 --runs 400 \
   'whetuu prompt --shell fish --status 0 --duration-ms 0 --width 100'
 ```
 
-**Slow repositories cannot hang your shell.** Both subprocesses are bounded — 250
-ms for `git`, 200 ms for the toolchain probe — and because they run concurrently
-the worst case is the larger of the two, not their sum. With a `git` that hangs
-for 30 s the prompt still returns in 257 ms, simply without the git segment.
+**A slow repository cannot hang your shell.** Both subprocesses are bounded. The
+`git` call gets 250 ms and the toolchain probe gets 200 ms. They run at the same
+time, so the worst case is the larger of the two, not the sum. Given a `git`
+that hangs for 30 s, the prompt still returns in 257 ms. It simply drops the git
+segment.
 
-In a large repository the render is almost entirely `git status`, and most of
-that is scanning for untracked files. That is git's to speed up, not whetuu's —
-turning on its untracked cache cut `git status` from 13.5 ms to 5.7 ms on an
-8,000-file test repository:
+In a large repository, almost all of that time is `git status`, and most of that
+is the scan for untracked files. Speeding it up is git's job, not whetuu's.
+Turning on git's untracked cache cut `git status` from 13.5 ms to 5.7 ms on a
+test repository of 8000 files:
 
 ```sh
 git config core.untrackedCache true
@@ -86,60 +84,59 @@ git config core.untrackedCache true
 
 ## Security
 
-whetuu is a small binary that reads your repository and prints a line. What that
-does and does not involve:
+whetuu reads your repository and prints a line. Here is what that involves.
 
-- **No network access.** There is no socket, HTTP, or DNS code in the binary, and
-  no telemetry or update check.
-- **No config file**, so no config parser and nothing in your dotfiles for
-  another tool to write to. The only files written are the history store and a
-  version cache at `~/.cache/whetuu/versions` (or under `$XDG_CACHE_HOME`),
-  which holds nothing but toolchain version strings and is safe to delete at
-  any time.
-- **Two subprocesses, both bounded**: `git status --porcelain=2 --branch -z`, and
-  the detected toolchain's version command (`zig version`, `node --version`, …).
-  Nothing else is executed.
-- **The history store is `0600`**, re-asserted on every append, because command
-  lines routinely contain paths and secrets. It lives at
-  `~/.local/share/whetuu/history` — or under `$XDG_DATA_HOME` when that is set,
-  which it usually is not, on macOS or Linux.
-- **A leading space keeps a command out of the store**, the same convention
-  shells have used for decades:
+- **No network access.** The binary has no socket, HTTP or DNS code. There is no
+  telemetry and no update check.
+- **No config file.** So there is no config parser, and nothing in your dotfiles
+  for another tool to write to. whetuu writes two files. One is the history
+  store. The other is a version cache at `~/.cache/whetuu/versions`, or under
+  `$XDG_CACHE_HOME` when that is set. The cache holds toolchain version strings
+  and nothing else. Delete it whenever you like.
+- **Two subprocesses, both bounded.** `git status --porcelain=2 --branch -z`,
+  and the version command of the detected toolchain (`zig version`,
+  `node --version`, …). Nothing else is executed.
+- **The history store is `0600`**, set again on every append. Command lines
+  routinely contain paths and secrets. The store lives at
+  `~/.local/share/whetuu/history`, or under `$XDG_DATA_HOME` when that is set.
+  It usually is not set, on macOS or Linux.
+- **A leading space keeps a command out of the store.** Shells have used this
+  convention for decades:
 
   ```sh
    curl -H "Authorization: Bearer $TOKEN" https://api.example.com
   ```
 
-  This works in fish, zsh and bash. bash needs help — its `history` output has
-  already lost the indentation by the time whetuu sees it — so the bash
-  integration adds `ignorespace` to your `HISTCONTROL`, keeping any value you
-  had. The command then stays out of bash's history too.
+  This works in fish, zsh and bash. bash needs help, because its `history`
+  output has already lost the indentation by the time whetuu sees the command.
+  So the bash integration adds `ignorespace` to your `HISTCONTROL` and keeps any
+  value you already had. The command then stays out of bash's history too.
 
-- **Otherwise, command lines are stored in plaintext.** A token pasted into a
-  `curl` you *didn't* prefix with a space is written to that file verbatim if
-  the command succeeds. File permissions are the only protection; there is no
-  redaction. Prefer environment variables or a credentials file for secrets, as
-  you would with your shell's own history.
+- **Anything else is stored in plaintext.** Paste a token into a `curl` without
+  that leading space and the whole line is written to the store, as long as the
+  command succeeds. File permissions are the only protection. Nothing is
+  redacted. Keep secrets in environment variables or a credentials file, as you
+  would with your shell's own history.
 
-  (Only commands that exited `0` are stored, but treat that as noise reduction
-  for the picker, not a safeguard — it filters out your typos, not your
-  successful `curl`.)
+  Only commands that exited `0` are stored. Treat that as noise reduction for
+  the picker, not a safeguard. It filters out your typos, not your working
+  `curl`.
 
-One thing to be aware of: the language module decides *which* toolchain to probe
-from files in the current directory, so `cd`-ing into an untrusted repository can
-cause whetuu to run, say, `node --version`. It executes the binary your `PATH`
-resolves, never one from the repository — but if you keep `.` in your `PATH`,
-that distinction disappears, and it disappears for every other tool you run too.
+One thing to know. The language module picks which toolchain to probe from the
+files in the current directory. So entering an untrusted repository can make
+whetuu run something like `node --version`. It runs the binary your `PATH`
+resolves, never one from the repository. If you keep `.` in your `PATH` that
+distinction goes away, and it goes away for every other tool you run too.
 
 ## Install
 
-Prebuilt binaries are published on the
-[releases page](https://github.com/yamafaktory/whetuu/releases) for:
+Prebuilt binaries are on the
+[releases page](https://github.com/yamafaktory/whetuu/releases):
 
 | Platform | Target |
 |---|---|
-| Linux x86-64 | `x86_64-linux-musl` (static, no runtime dependencies) |
-| Linux ARM64 | `aarch64-linux-musl` (static, no runtime dependencies) |
+| Linux x86-64 | `x86_64-linux-musl`, static, no runtime dependencies |
+| Linux ARM64 | `aarch64-linux-musl`, static, no runtime dependencies |
 | macOS Apple Silicon | `aarch64-macos` |
 | macOS Intel | `x86_64-macos` |
 
@@ -151,11 +148,12 @@ tar -xzf whetuu-<version>-<target>.tar.gz
 sudo mv whetuu /usr/local/bin/
 ```
 
-Each release also ships a `SHA256SUMS` file if you want to verify the download.
+Every release also ships a `SHA256SUMS` file, if you want to verify the
+download.
 
-> **macOS: the binaries are unsigned.** If you download the tarball in a
-> browser, Gatekeeper quarantines it and the first run fails with *"cannot be
-> opened because the developer cannot be verified"*. Clear the flag once:
+> **macOS: the binaries are unsigned.** Download the tarball in a browser and
+> Gatekeeper quarantines it. The first run then fails with *"cannot be opened
+> because the developer cannot be verified"*. Clear the flag once:
 >
 > ```sh
 > xattr -d com.apple.quarantine "$(command -v whetuu)"
@@ -163,19 +161,19 @@ Each release also ships a `SHA256SUMS` file if you want to verify the download.
 >
 > Downloading with `curl` or `wget` avoids the quarantine attribute entirely.
 
-Check it worked — `whetuu` with no arguments prints the command list:
+Check it worked. Running `whetuu` with no arguments prints the command list:
 
 ```sh
 whetuu
 whetuu --version
 ```
 
-Then wire it into your shell — see [Shell setup](#shell-setup).
+Then wire it into your shell. See [Shell setup](#shell-setup).
 
 ### From source
 
-Needs Zig 0.17 (dev) — see `minimum_zig_version` in `build.zig.zon` for the
-exact nightly.
+Needs Zig 0.17 (dev). See `minimum_zig_version` in `build.zig.zon` for the exact
+nightly.
 
 ```sh
 git clone https://github.com/yamafaktory/whetuu.git
@@ -188,7 +186,7 @@ Other build steps:
 
 ```sh
 zig build test         # run the unit tests
-zig build check        # type-check only
+zig build check        # type check only
 zig build fmt          # format all source files
 zig build run          # build and run without installing
 ```
@@ -204,7 +202,7 @@ Add the matching line to your shell config, then restart the shell:
 whetuu init fish | source
 ```
 
-**bash** — `~/.bashrc` (needs bash 5+ for command timing)
+**bash** — `~/.bashrc` (needs bash 5 or newer for command timing)
 ```bash
 eval "$(whetuu init bash)"
 ```
@@ -214,64 +212,65 @@ eval "$(whetuu init bash)"
 eval "$(whetuu init zsh)"
 ```
 
-`whetuu init <shell>` prints the integration script; the shell hook calls
-`whetuu prompt …` on every prompt, passing the last exit status, command
-duration, and terminal width.
+`whetuu init <shell>` prints the integration script. The shell hook then calls
+`whetuu prompt …` on every prompt, passing the last exit status, the command
+duration, and the terminal width.
 
 ## Usage
 
-Day to day there is nothing to run: the shell hook drives everything, and the
-history picker is bound to **up-arrow**. The full command surface:
+Day to day there is nothing to run. The shell hook drives everything, and the
+history picker is on the up arrow. The full command surface:
 
 | Command | Does |
 |---|---|
 | `whetuu` | Print the command list |
 | `whetuu --version` | Print the version |
-| `whetuu init <fish\|bash\|zsh>` | Print the shell integration script — meant to be `source`d / `eval`ed |
-| `whetuu prompt` | Render one prompt; called by the shell hook, not by you |
+| `whetuu init <fish\|bash\|zsh>` | Print the shell integration script, meant to be `source`d or `eval`ed |
+| `whetuu prompt` | Render one prompt. Called by the shell hook, not by you |
 | `whetuu history` | Open the interactive history picker |
-| `whetuu history add -- <command>` | Record a finished command; called by the shell hook |
+| `whetuu history add -- <command>` | Record a finished command. Called by the shell hook |
 
-`prompt` and `history add` take flags that only the init scripts pass (exit
-status, duration, width), which is why they're omitted here.
+`prompt` and `history add` take flags that only the init scripts pass, namely
+exit status, duration and width. That is why they are left out here.
 
 ## History
 
-whetuu keeps its own command history — a single, deduplicated, cross-shell
-store at `~/.local/share/whetuu/history`, or `$XDG_DATA_HOME/whetuu/history`
-when that variable is set. macOS uses the same path rather than `~/Library`, so
-the store stays put when a dotfiles setup is shared across machines.
-Commands are recorded after they finish and only when they exited with status
-0, so typos and failed runs never clutter the picker. Prefixing a command with a
-space keeps it out of the store entirely. Each command is recorded together with
-the directory it ran in.
-Every integration records commands there and binds **up-arrow** to the
-interactive picker; anything already typed on the command line carries over
-into the picker's search field. The picker opens scoped to the **current
-directory's history** — the commands you actually run in this project — and
-falls back to all history when the directory has none yet. A bar at the top of
-the screen shows both scopes with the active one highlighted —
-`~/dev/whetuu | all`:
+whetuu keeps its own command history. It is one file, shared by all three
+shells, at `~/.local/share/whetuu/history`. It moves under `$XDG_DATA_HOME` when
+that variable is set. macOS uses the same path rather than `~/Library`, so the
+store stays put when you share a dotfiles setup across machines.
 
-- **type to filter** — each space-separated word must match (case-insensitive)
-- **↑ / ↓** — move the selection (↑ goes further back in time)
-- **Ctrl+G** — toggle the scope between this directory's history and all
-  history
-- **Tab** — copy the selected command into the search field (plus a trailing
-  space) to edit it or append flags before running
-- **Enter** — run the chosen command immediately; when nothing matches the
-  search text anymore (e.g. after adding new flags), run the text as typed
+A command is recorded once it finishes, and only when it exited with status 0.
+Typos and failed runs never clutter the picker. Prefix a command with a space to
+keep it out of the store entirely. Every command is stored together with the
+directory it ran in.
+
+All three integrations bind the **up arrow** to the picker. Anything already
+typed on the command line carries over into the search field. The picker opens
+on the current directory's history, which is the set of commands you actually
+run in this project. It falls back to all history when the directory has none
+yet. A bar at the top names both scopes and highlights the active one, like
+`~/dev/whetuu | all`.
+
+- **type to filter** — every word must match, ignoring case
+- **↑ / ↓** — move the selection, where ↑ goes further back in time
+- **Ctrl+G** — switch between this directory's history and all history
+- **Tab** — copy the selected command into the search field, with a trailing
+  space, so you can edit it or append flags before running
+- **Enter** — run the selected command. When nothing matches the search text any
+  more, say after you added a flag, it runs the text as typed
 - **Esc / Ctrl-C** — cancel, leaving whatever you had typed on the command line
 
-The picker behaves identically in fish, bash and zsh.
+The picker behaves the same in all three shells.
 
-The list is bottom-anchored: the most recent command sits just above the search
-line, older commands climb upward, each prefixed with how long ago it ran
-(`5m`, `2h`, `3d`). The selected row is highlighted full-width in the
-prompt's star purple. The picker draws on `/dev/tty`, so nothing but the chosen
-command reaches stdout. Duplicates are collapsed per directory, so the same
-command run in two projects keeps its own recency in each; there is no
-configuration. All three shells (fish, bash, zsh) record into the shared store.
+The list grows upward from the bottom. The most recent command sits just above
+the search line and older ones climb from there. Each row is prefixed with how
+long ago it ran, like `5m`, `2h` or `3d`. The selected row is highlighted across
+the full width in the prompt's star purple.
+
+The picker draws on `/dev/tty`, so nothing but the chosen command reaches
+stdout. Duplicates are collapsed per directory, so the same command run in two
+projects keeps its own recency in each.
 
 ## License
 
