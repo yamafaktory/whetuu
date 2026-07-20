@@ -6,7 +6,7 @@ Maintainer notes. Users only need the
 ## Cut a release
 
 ```sh
-zig build publish -Dversion=v0.1.0
+zig build publish -- v0.1.0
 ```
 
 That runs the tests, builds every release target, then tags the current commit

@@ -16,8 +16,8 @@ die() {
     exit 1
 }
 
-[ -n "$version" ] || die "no version given; use: zig build publish -Dversion=vX.Y.Z"
-[ "$version" != dev ] || die "-Dversion=vX.Y.Z is required (got the 'dev' default)"
+[ -n "$version" ] || die "no version given; use: zig build publish -- vX.Y.Z"
+[ "$version" != dev ] || die "no version given; use: zig build publish -- vX.Y.Z"
 
 if ! [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
     die "version must look like v1.2.3 or v1.2.3-rc.1, got '$version'"

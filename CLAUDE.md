@@ -112,8 +112,9 @@ targets, build steps, or publishing flow move.
 - `zig build run -- <args>` — compile and run (e.g. `-- prompt --shell fish --status 0`)
 - `zig build release` — cross-compile + package a tarball per target into
   `zig-out/release/`; `-Dversion=vX.Y.Z` stamps `whetuu --version`
-- `zig build publish -Dversion=vX.Y.Z` — tag and push, triggering the release
-  workflow (see `RELEASING.md`)
+- `zig build publish -- vX.Y.Z` — tag and push, triggering the release workflow
+  (see `RELEASING.md`). The tag comes after `--`; `-Dversion` is only for
+  stamping a local `release` build.
 
 The published target list lives in `release_targets` in `build.zig`, and both CI
 workflows call `zig build release`, so it is the only place a target is named.
