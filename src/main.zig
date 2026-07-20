@@ -62,6 +62,8 @@ fn runPrompt(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: 
         .cwd = cwd_buf[0..cwd_len],
         .home = environ.get("HOME") orelse "",
         .user = environ.get("USER") orelse "",
+        .path = environ.get("PATH") orelse "",
+        .cache_home = environ.get("XDG_CACHE_HOME") orelse "",
         .ssh = environ.get("SSH_CONNECTION") != null or environ.get("SSH_TTY") != null,
         .width = opts.width,
         .duration_ms = opts.duration_ms,
@@ -169,4 +171,5 @@ test {
     _ = @import("render.zig");
     _ = @import("style.zig");
     _ = @import("time_ago.zig");
+    _ = @import("version_cache.zig");
 }

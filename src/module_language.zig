@@ -11,6 +11,7 @@ const Env = @import("Env.zig");
 const Rgb = @import("style.zig").Rgb;
 const Span = @import("style.zig").Span;
 const style = @import("style.zig");
+const version_cache = @import("version_cache.zig");
 
 /// Upper bound on a version probe. Toolchains that are slow to report a version
 /// simply show the bare language name instead.
@@ -132,7 +133,7 @@ pub fn run(io: Io, arena: Allocator, env: *const Env) Result {
     const lang = detect(io, env.cwd) orelse return .{};
 
     const text = label: {
-        const version = probeAnyVersion(io, arena, lang) orelse
+        const version = cachedVersion(io, arena, env, lang) orelse
             break :label lang.icon;
         break :label std.fmt.allocPrint(arena, "{s} v{s}", .{ lang.icon, version }) catch return .{ .lang = lang };
     };
@@ -233,6 +234,29 @@ fn probeAnyVersion(io: Io, arena: Allocator, lang: Lang) ?[]const u8 {
 
     const alt = lang.argv_alt orelse return null;
     return probeVersion(io, arena, alt);
+}
+
+/// The toolchain version, from the cache when its executable is unchanged since
+/// the entry was written, otherwise probed and recorded. Spawning a process is
+/// by far the most expensive thing a render does, so this is the difference
+/// between a ~9 ms and a ~3 ms prompt in a typical project.
+///
+/// Falls back to a plain probe whenever the cache cannot be used — no `$PATH`
+/// to resolve against, nowhere to write, or a toolchain with a fallback command
+/// (the two candidates share one entry key, so caching would be ambiguous).
+fn cachedVersion(io: Io, arena: Allocator, env: *const Env, lang: Lang) ?[]const u8 {
+    if (env.path.len == 0 or lang.argv_alt != null) return probeAnyVersion(io, arena, lang);
+
+    const cache_path = (version_cache.path(arena, env.cache_home, env.home) catch null) orelse
+        return probeAnyVersion(io, arena, lang);
+    const key = version_cache.resolve(io, arena, env.path, lang.argv[0]) orelse
+        return probeAnyVersion(io, arena, lang);
+
+    if (version_cache.get(io, arena, cache_path, lang.name, key)) |version| return version;
+
+    const version = probeVersion(io, arena, lang.argv) orelse return null;
+    version_cache.put(io, arena, cache_path, lang.name, key, version);
+    return version;
 }
 
 /// Runs the toolchain's version command and extracts a version string from its

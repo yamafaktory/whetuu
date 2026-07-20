@@ -13,6 +13,11 @@ cwd: []const u8,
 home: []const u8,
 /// Value of `$USER`; empty when unset.
 user: []const u8 = "",
+/// Value of `$PATH`, used to resolve a toolchain binary before probing it.
+/// Empty disables the version cache, so every probe runs.
+path: []const u8 = "",
+/// Value of `$XDG_CACHE_HOME`; empty falls back to `$HOME/.cache`.
+cache_home: []const u8 = "",
 /// True when the shell runs over SSH (`$SSH_CONNECTION` or `$SSH_TTY` set).
 ssh: bool = false,
 /// Terminal width in columns; 0 when unknown.

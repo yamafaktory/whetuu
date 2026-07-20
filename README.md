@@ -16,8 +16,9 @@ An opinionated, **zero-config** cross-shell prompt written in Zig 0.17.
 
 There is nothing to configure: a single compiled binary renders one curated
 prompt, the same for everyone. Every module runs concurrently via `std.Io`
-(`Io.async` → `Future`, backed by `Io.Threaded`), so a full render — including a
-`git` call and a toolchain version probe — completes in a few milliseconds.
+(`Io.async` → `Future`, backed by `Io.Threaded`), so a render costs about what
+its *slowest* probe costs rather than the sum of all of them — see
+[Performance](#performance).
 
 > **Requires a [Nerd Font](https://www.nerdfonts.com/).** The prompt uses Nerd
 > Font glyphs for the git branch, language logos, and the prompt character.
@@ -41,6 +42,47 @@ Left to right, each shown only when relevant:
 | `language`    | Logo + toolchain version in the brand color — 39 languages & tools, detected from a project manifest (`Cargo.toml`, `mix.exs`, …), a source-file extension (`*.odin`, `*.rkt`, …), or an infra marker (`flake.nix`, `Dockerfile`, `*.tf` for Terraform/OpenTofu) |
 | `cmd_duration`| Timer glyph + `<time>` when the last command ran ≥ 2 s                      |
 | `character`   | A star, purple by default or in the project's language brand color — forced red after a failed command |
+
+## Performance
+
+A prompt runs before every command, so its cost is paid constantly. Numbers from
+`hyperfine --warmup 40 --runs 400` on a 13th-gen i9-13900H, ReleaseFast build,
+with the toolchain version cache warm:
+
+| Directory | Render | For comparison |
+|---|---|---|
+| No repo, no toolchain | **3.7 ms** ± 1.0 | — |
+| 33-file Zig repo | **6.2 ms** ± 3.1 | `zig version` alone: 8.5 ms |
+| 8,079-file monorepo | **33.2 ms** ± 7.5 | `git status` alone: 32.6 ms |
+
+Two things do most of the work there. Modules overlap, so a render costs about
+what its slowest probe costs rather than their sum — in the monorepo the whole
+prompt is indistinguishable from `git status` on its own. And toolchain versions
+are cached (keyed on the binary's path, mtime and size), so the Zig repo renders
+in *less* time than one `zig version` call takes: the first prompt in a project
+pays for the probe, later ones read a small file instead. Upgrading a toolchain
+changes its mtime, which invalidates the entry on its own.
+
+Reproduce it with:
+
+```sh
+hyperfine --warmup 40 --runs 400 \
+  'whetuu prompt --shell fish --status 0 --duration-ms 0 --width 100'
+```
+
+**Slow repositories cannot hang your shell.** Both subprocesses are bounded — 250
+ms for `git`, 200 ms for the toolchain probe — and because they run concurrently
+the worst case is the larger of the two, not their sum. With a `git` that hangs
+for 30 s the prompt still returns in 257 ms, simply without the git segment.
+
+In a large repository the render is almost entirely `git status`, and most of
+that is scanning for untracked files. That is git's to speed up, not whetuu's —
+turning on its untracked cache cut `git status` from 13.5 ms to 5.7 ms on an
+8,000-file test repository:
+
+```sh
+git config core.untrackedCache true
+```
 
 ## Install
 
@@ -150,9 +192,9 @@ status, duration, width), which is why they're omitted here.
 ## History
 
 whetuu keeps its own command history — a single, deduplicated, cross-shell
-store at `$XDG_DATA_HOME/whetuu/history` (or `~/.local/share/whetuu/history`).
-macOS uses that same XDG path rather than `~/Library`, so the store stays put
-when a dotfiles setup is shared across machines.
+store at `~/.local/share/whetuu/history`, or `$XDG_DATA_HOME/whetuu/history`
+when that variable is set. macOS uses the same path rather than `~/Library`, so
+the store stays put when a dotfiles setup is shared across machines.
 Commands are recorded after they finish and only when they exited with status
 0, so typos and failed runs never clutter the picker. Each command is recorded
 together with the directory it ran in.
