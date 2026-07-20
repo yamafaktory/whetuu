@@ -50,3 +50,35 @@ __whetuu_precmd() {
     PS1="$(whetuu prompt --shell bash --status "$exit" --duration-ms "$dur_ms" --width "$COLUMNS")"
 }
 PROMPT_COMMAND=__whetuu_precmd
+
+# Up arrow opens the whetuu history picker and runs the chosen command right
+# away, the same as the fish and zsh integrations. Anything already typed seeds
+# the picker's search field. The picker draws on /dev/tty, so its stdout is only
+# the choice.
+#
+# A `bind -x` function cannot run a command itself, so the key expands to a
+# two-step macro: the function first, then a follow-up key. The function decides
+# what that follow-up key does before readline gets to it, which is how the
+# choice is run but a cancel is not. readline resolves each key of a macro as it
+# reads it, so rebinding from inside the function takes effect in time.
+__whetuu_history() {
+    local picked
+    picked=$(command whetuu history --query "$READLINE_LINE" </dev/tty)
+    if [[ -n "$picked" ]]; then
+        READLINE_LINE="$picked"
+        READLINE_POINT=${#READLINE_LINE}
+        bind '"\C-x\C-z": accept-line'
+    else
+        # Cancelled. Leave the line alone and make the follow-up key harmless.
+        bind '"\C-x\C-z": redraw-current-line'
+    fi
+}
+
+if [[ $- == *i* ]]; then
+    bind -x '"\C-x\C-w": __whetuu_history'
+    bind '"\C-x\C-z": redraw-current-line'
+    # Both the normal and the application cursor sequence, since which one the
+    # terminal sends depends on keypad mode.
+    bind '"\e[A": "\C-x\C-w\C-x\C-z"'
+    bind '"\eOA": "\C-x\C-w\C-x\C-z"'
+fi

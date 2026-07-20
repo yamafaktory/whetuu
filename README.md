@@ -24,7 +24,7 @@ its *slowest* probe costs rather than the sum of all of them — see
 > Font glyphs for the git branch, language logos, and the prompt character.
 > Without one those glyphs show as tofu boxes.
 
-![whetuu in a fish session: the prompt tracking branch, git status and toolchain
+![a terminal session: the prompt tracking branch, git status and toolchain
 version, then the history picker filtering and running a
 command](docs/demo.gif)
 
@@ -221,8 +221,7 @@ duration, and terminal width.
 ## Usage
 
 Day to day there is nothing to run: the shell hook drives everything, and the
-only command you invoke by hand is the history picker (bound to **up-arrow**
-under fish). The full command surface:
+history picker is bound to **up-arrow**. The full command surface:
 
 | Command | Does |
 |---|---|
@@ -246,7 +245,7 @@ Commands are recorded after they finish and only when they exited with status
 0, so typos and failed runs never clutter the picker. Prefixing a command with a
 space keeps it out of the store entirely. Each command is recorded together with
 the directory it ran in.
-The fish integration records every command there and binds **up-arrow** to an
+Every integration records commands there and binds **up-arrow** to the
 interactive picker; anything already typed on the command line carries over
 into the picker's search field. The picker opens scoped to the **current
 directory's history** — the commands you actually run in this project — and
@@ -262,7 +261,9 @@ the screen shows both scopes with the active one highlighted —
   space) to edit it or append flags before running
 - **Enter** — run the chosen command immediately; when nothing matches the
   search text anymore (e.g. after adding new flags), run the text as typed
-- **Esc / Ctrl-C** — cancel
+- **Esc / Ctrl-C** — cancel, leaving whatever you had typed on the command line
+
+The picker behaves identically in fish, bash and zsh.
 
 The list is bottom-anchored: the most recent command sits just above the search
 line, older commands climb upward, each prefixed with how long ago it ran
