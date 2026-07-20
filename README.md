@@ -1,5 +1,9 @@
 # 🌟 whetū
 
+[![CI](https://github.com/yamafaktory/whetuu/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/yamafaktory/whetuu/actions/workflows/ci.yml)
+[![version](https://img.shields.io/github/v/release/yamafaktory/whetuu?sort=semver&display_name=tag&label=version)](https://github.com/yamafaktory/whetuu/releases/latest)
+[![license](https://img.shields.io/github/license/yamafaktory/whetuu)](LICENSE)
+
 *whetū* is Māori for "star" — fitting, since a star (the Nerd Font glyph
 `nf-md-star_face`) is the default prompt character. The binary is installed as
 the ASCII command `whetuu`.
@@ -173,3 +177,7 @@ prompt's star purple. The picker draws on `/dev/tty`, so nothing but the chosen
 command reaches stdout. Duplicates are collapsed per directory, so the same
 command run in two projects keeps its own recency in each; there is no
 configuration. All three shells (fish, bash, zsh) record into the shared store.
+
+## License
+
+[MIT](LICENSE)
