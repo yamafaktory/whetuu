@@ -62,11 +62,18 @@ pub fn build(b: *std.Build) void {
         release_step.dependOn(&install.step);
     }
 
-    // Publishing only pushes a tag; the workflow builds and uploads from a
-    // clean checkout, so what ships never depends on the local working tree.
-    // The tag comes from `zig build publish -- v0.1.0` rather than -Dversion,
-    // which stays reserved for stamping a local `release` build.
-    const publish_step = b.step("publish", "Tag the current commit and push it, triggering the release workflow (zig build publish -- vX.Y.Z)");
+    // The version comes from `zig build publish -- v0.1.0` rather than
+    // -Dversion, which stays reserved for stamping a local `release` build.
+    const bump_step = b.step("bump", "Set the version in build.zig.zon (zig build bump -- vX.Y.Z)");
+    const bump = b.addSystemCommand(&.{"bash"});
+    bump.addFileArg(b.path("tools/bump.sh"));
+    bump.addPassthruArgs();
+    bump.stdio = .inherit;
+    bump_step.dependOn(&bump.step);
+
+    // Publishing bumps, pushes and tags, but never builds what ships — the
+    // workflow does that from a clean checkout of the tag.
+    const publish_step = b.step("publish", "Cut a release: bump, push, wait for CI, then tag (zig build publish -- vX.Y.Z)");
     const publish = b.addSystemCommand(&.{"bash"});
     publish.addFileArg(b.path("tools/release.sh"));
     publish.addPassthruArgs();

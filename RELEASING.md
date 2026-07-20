@@ -5,39 +5,59 @@ Maintainer notes. Users only need the
 
 ## Cut a release
 
+One command, start to finish:
+
 ```sh
 zig build publish -- v0.1.0
 ```
 
-That runs the tests, builds every release target, then tags the current commit
-and pushes the tag — which is what triggers
+It runs the local tests and builds every release target, then:
+
+1. checks the tree is clean, you are on `main`, `main` matches `origin/main`,
+   and the tag does not already exist
+2. bumps `.version` in `build.zig.zon` and commits it as `Release v0.1.0`
+   (skipped when already correct)
+3. pushes `main`
+4. waits for CI to pass **on that exact commit**, polling the public GitHub API
+   (needs `curl` and `python3`; no token, since the repo is public)
+5. tags and pushes the tag
+
+Step 5 is what triggers
 [`.github/workflows/release.yml`](.github/workflows/release.yml). The workflow
 re-runs the tests on a clean checkout, runs `zig build release -Dversion=<tag>`,
 and attaches the four tarballs plus a `SHA256SUMS` file with generated release
 notes. Nothing that ships is built from your working tree.
 
 The command returns as soon as the tag is pushed; the release itself appears a
-few minutes later.
-
-```sh
-gh run watch             # follow the build
-gh release view v0.1.0   # confirm the artifacts
-```
+few minutes later, at
+[Actions](https://github.com/yamafaktory/whetuu/actions) and then
+[Releases](https://github.com/yamafaktory/whetuu/releases).
 
 ## What it refuses to do
 
-Every check runs before any tag is created, so a rejected run leaves nothing
-behind locally or on the remote:
+These are all checked before anything is written, so a run rejected here leaves
+nothing behind locally or on the remote:
 
 - the version is missing, `dev`, or not shaped like `v1.2.3` / `v1.2.3-rc.1`
 - the working tree is dirty
 - the current branch is not `main`
-- `main` and `origin/main` disagree — the workflow checks out the *tag*, so a
-  commit that only exists locally would publish from something nobody can see
+- `main` and `origin/main` disagree — starting level keeps the bump the only
+  commit publishing adds
 - the tag already exists locally or on origin
+- `origin` is not a GitHub remote, so CI cannot be verified
 
-If the push itself fails, the local tag is deleted again so a retry is not
-blocked by leftover state.
+## If it fails partway
+
+The bump commit is pushed (step 3) before CI is awaited (step 4), so a failure
+after that point leaves `main` one commit ahead with no tag:
+
+- **CI fails** — fix it, commit, and re-run the same command. The bump is
+  already in place, so it just pushes the fix, waits again, and tags.
+- **CI times out** (20 minutes) — re-run once it finishes.
+- **The tag push fails** — the local tag is deleted again so a retry is not
+  blocked by leftover state.
+
+Nothing here needs a force-push; re-running is always the recovery.
 
 Tags are annotated, and signed when `tag.gpgsign` is enabled — expect a
 passphrase prompt unless the GPG agent is already unlocked.
@@ -70,16 +90,25 @@ quarantine note is the trade.
 
 ## Undo a release
 
+Delete the release from the
+[releases page](https://github.com/yamafaktory/whetuu/releases) (or
+`gh release delete v0.1.0 --yes` if you have `gh`), then drop the tag:
+
 ```sh
-gh release delete v0.1.0 --yes
 git push origin :refs/tags/v0.1.0
 git tag -d v0.1.0
 ```
 
-Then fix and publish again.
+Then fix and publish again. The `Release v0.1.0` commit stays on `main` — the
+next `publish` bumps over it rather than needing it reverted.
 
 ## Versioning
 
 The tag name is the single source of truth — it flows through `-Dversion` into
-`build_options` and is what `whetuu --version` prints. `build.zig.zon` carries a
-separate `.version` field that does not feed the binary.
+`build_options` and is what `whetuu --version` prints.
+
+`build.zig.zon`'s `.version` is package metadata, read only by the Zig package
+manager when another project depends on whetuu; it does not feed the binary.
+`publish` bumps it automatically (minus the leading `v`, since the field takes a
+bare semver), so it cannot drift from the tag. `zig build bump -- vX.Y.Z` does
+just that step on its own, if you ever want it separately.
