@@ -33,6 +33,19 @@ few minutes later, at
 [Actions](https://github.com/yamafaktory/whetuu/actions) and then
 [Releases](https://github.com/yamafaktory/whetuu/releases).
 
+## Pre-releases
+
+A tag with a semver suffix is published as a GitHub pre-release, so it never
+becomes the "latest" release the install docs point people at:
+
+```sh
+zig build publish -- v0.1.0-rc.1
+```
+
+Use one to rehearse the whole pipeline, or to get a build in front of someone
+before committing to the version. Everything else is identical — same four
+targets, same checksums, same stamped binary.
+
 ## What it refuses to do
 
 These are all checked before anything is written, so a run rejected here leaves

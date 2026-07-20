@@ -30,8 +30,18 @@ jobs:
       - name: Checksum
         run: (cd zig-out/release && sha256sum ./*.tar.gz > SHA256SUMS)
 
+      # A semver pre-release suffix (v1.2.3-rc.1) must not be published as the
+      # latest stable release — that is what the install docs point people at.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.ref_name }}
-        run: gh release create "$VERSION" zig-out/release/* --title "$VERSION" --generate-notes
+        run: |
+          case "$VERSION" in
+            *-*) prerelease=--prerelease ;;
+            *)   prerelease= ;;
+          esac
+          gh release create "$VERSION" zig-out/release/* \
+            --title "$VERSION" \
+            --generate-notes \
+            ${prerelease:+"$prerelease"}
