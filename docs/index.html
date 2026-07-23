@@ -319,6 +319,7 @@ th { font-family: var(--mono); font-size: 0.82rem; letter-spacing: 0.12em; text-
 td { color: var(--muted); }
 td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
 td.first { color: var(--ink); }
+td.desc { white-space: normal; min-width: 22rem; }
 
 /* ---- code ---- */
 pre {
@@ -402,6 +403,7 @@ body:has(#install:target) .nav-links a[href="#install"],
 body:has(#demo:target) .nav-links a[href="#demo"],
 body:has(#modules:target) .nav-links a[href="#modules"],
 body:has(#picker:target) .nav-links a[href="#picker"],
+body:has(#commands:target) .nav-links a[href="#commands"],
 body:has(#performance:target) .nav-links a[href="#performance"],
 body:has(#security:target) .nav-links a[href="#security"] {
   color: var(--accent);
@@ -415,7 +417,7 @@ body:has(#security:target) .nav-links a[href="#security"] {
   transform: translateY(-0.037em);
 }
 
-/* Narrow screens: seven links cannot fit, so the bar carries the mark alone
+/* Narrow screens: eight links cannot fit, so the bar carries the mark alone
    and the page is short enough to scroll. */
 @media (max-width: 760px) {
   .nav { padding-inline: 1rem; }
@@ -450,6 +452,7 @@ footer p { margin: 0 0 0.4rem; }
       <a href="#demo">Demo</a>
       <a href="#modules">Modules</a>
       <a href="#picker">Picker</a>
+      <a href="#commands">Commands</a>
       <a href="#performance">Performance</a>
       <a href="#security">Security</a>
       <a href="https://github.com/yamafaktory/whetuu">GitHub</a>
@@ -543,6 +546,27 @@ footer p { margin: 0 0 0.4rem; }
     <li><b>Enter</b><span>Run it. When nothing matches any more, runs the text as typed.</span></li>
     <li><b>Esc</b><span>Cancel, leaving whatever you had typed on the command line.</span></li>
   </ul>
+</section>
+<section class="wrap" id="commands">
+  <p class="eyebrow">~/commands</p>
+  <h2>Nothing to run day to day</h2>
+  <p>The shell hook drives everything and the picker is on the up arrow, so two of these are called for you and you never type them. This is the whole command surface.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Command</th><th>Does</th></tr></thead>
+      <tbody>
+        <tr><td class="first"><code>whetuu</code></td><td class="desc">Print the command list.</td></tr>
+        <tr><td class="first"><code>whetuu --version</code></td><td class="desc">Print the version.</td></tr>
+        <tr><td class="first"><code>whetuu init &lt;fish|bash|zsh&gt;</code></td><td class="desc">Print the shell integration script, meant to be <code>source</code>d or <code>eval</code>ed. Prints the setup line instead when run straight into a terminal.</td></tr>
+        <tr><td class="first"><code>whetuu prompt</code></td><td class="desc">Render one prompt. Called by the shell hook, not by you.</td></tr>
+        <tr><td class="first"><code>whetuu history</code></td><td class="desc">Open the interactive history picker.</td></tr>
+        <tr><td class="first"><code>whetuu history add -- &lt;command&gt;</code></td><td class="desc">Record a finished command. Called by the shell hook.</td></tr>
+        <tr><td class="first"><code>whetuu paths</code></td><td class="desc">Print where the history store and version cache live, and whether each file exists yet.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note"><code>prompt</code> and <code>history add</code> take flags that only the init scripts pass, namely exit status, duration and width. That is why they are left out here.</p>
+  <p class="note"><b>A fresh install has neither file.</b> <code>whetuu paths</code> marks the missing one rather than hiding it, until the first command is recorded and the first toolchain version is cached. With neither <b>$HOME</b> nor the matching XDG variable set it says so, because then whetuu has nowhere to write.</p>
 </section>
 <section class="wrap" id="performance">
   <p class="eyebrow">~/performance</p>

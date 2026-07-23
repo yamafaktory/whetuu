@@ -102,7 +102,7 @@ whetuu reads your repository and prints a line. Here is what that involves.
 - **Your data is not in the install directory.** The history store and the
   version cache follow the XDG base directory spec, so `rm -rf ~/.whetuu`
   removes whetuu without touching the history you built up with it. Run
-  `whetuu paths` to see both locations.
+  `whetuu paths` to see both locations, and whether each file exists yet.
 - **The installer edits one file, once.** It appends a `PATH` line and an
   `init` line to the config of the shell in `$SHELL`, guarded so a second run
   changes nothing. Not the config of a shell you do not use. Set
@@ -257,10 +257,15 @@ history picker is on the up arrow. The full command surface:
 | `whetuu prompt` | Render one prompt. Called by the shell hook, not by you |
 | `whetuu history` | Open the interactive history picker |
 | `whetuu history add -- <command>` | Record a finished command. Called by the shell hook |
-| `whetuu paths` | Print where the history store and version cache live |
+| `whetuu paths` | Print where the history store and version cache live, and whether each file exists yet |
 
 `prompt` and `history add` take flags that only the init scripts pass, namely
 exit status, duration and width. That is why they are left out here.
+
+`whetuu paths` marks a file that is not there yet rather than hiding it. A fresh
+install has neither until the first command is recorded and the first toolchain
+version is cached. With neither `$HOME` nor the matching XDG variable set it says
+so, because then whetuu has nowhere to write.
 
 ## History
 
