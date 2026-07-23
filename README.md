@@ -25,6 +25,9 @@ via `std.Io`, so a render costs about what its slowest probe costs. See
 ![A terminal session. The prompt tracks the branch, git status and toolchain
 version. The history picker then filters and runs a command](docs/demo.gif)
 
+[Website](https://yamafaktory.github.io/whetuu/) · [Install](#install) ·
+[Performance](#performance) · [Security](#security)
+
 ## Modules
 
 Left to right, each shown only when relevant:
@@ -96,8 +99,18 @@ whetuu reads your repository and prints a line. Here is what that involves.
 
 - **No network access.** The binary has no socket, HTTP or DNS code. There is no
   telemetry and no update check.
-- **No config file.** So there is no config parser, and nothing in your dotfiles
-  for another tool to write to. whetuu writes two files. One is the history
+- **Your data is not in the install directory.** The history store and the
+  version cache follow the XDG base directory spec, so `rm -rf ~/.whetuu`
+  removes whetuu without touching the history you built up with it. Run
+  `whetuu paths` to see both locations.
+- **The installer edits one file, once.** It appends a `PATH` line and an
+  `init` line to the config of the shell in `$SHELL`, guarded so a second run
+  changes nothing. Not the config of a shell you do not use. Set
+  `WHETUU_NO_MODIFY=1` and it prints them instead. The binary itself goes in
+  `~/.whetuu/bin`, so `rm -rf ~/.whetuu` plus those two lines removes it.
+- **No config file.** whetuu has none, so there is no config parser and no
+  format for anything to smuggle through. Running, it writes two files. One is
+  the history
   store. The other is a version cache at `~/.cache/whetuu/versions`, or under
   `$XDG_CACHE_HOME` when that is set. The cache holds toolchain version strings
   and nothing else. Delete it whenever you like.
@@ -138,8 +151,26 @@ distinction goes away, and it goes away for every other tool you run too.
 
 ## Install
 
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://yamafaktory.github.io/whetuu/install.sh | sh
+```
+
+That is the whole install. The script detects your platform, checks the download
+against the published `SHA256SUMS`, puts the binary in `~/.whetuu/bin`, and adds
+two lines to the config of the shell in `$SHELL`. Running it twice changes
+nothing. Open a new shell and the prompt is there.
+
+[Read it first](https://yamafaktory.github.io/whetuu/install.sh) if you would
+rather not pipe to a shell. Set `WHETUU_NO_MODIFY=1` and it prints the two lines
+instead of writing them, which [Shell setup](#shell-setup) also covers.
+Uninstalling is `rm -rf ~/.whetuu` and deleting those lines.
+
+<details>
+<summary>Other ways to install</summary>
+
 Prebuilt binaries are on the
-[releases page](https://github.com/yamafaktory/whetuu/releases):
+[releases page](https://github.com/yamafaktory/whetuu/releases), with a
+`SHA256SUMS` file to verify them:
 
 | Platform | Target |
 |---|---|
@@ -148,45 +179,24 @@ Prebuilt binaries are on the
 | macOS Apple Silicon | `aarch64-macos` |
 | macOS Intel | `x86_64-macos` |
 
-Download the tarball for your platform, unpack it, and move the binary to any
-directory on your `PATH`:
-
 ```sh
 tar -xzf whetuu-<version>-<target>.tar.gz
 sudo mv whetuu /usr/local/bin/
 ```
 
-Every release also ships a `SHA256SUMS` file, if you want to verify the
-download.
+The macOS binaries are unsigned. Download one in a browser and Gatekeeper
+quarantines it, so the first run fails with *"cannot be opened because the
+developer cannot be verified"*. Clear the flag once with
+`xattr -d com.apple.quarantine "$(command -v whetuu)"`. Downloading with `curl`
+or `wget` avoids the attribute entirely.
 
-> **macOS: the binaries are unsigned.** Download the tarball in a browser and
-> Gatekeeper quarantines it. The first run then fails with *"cannot be opened
-> because the developer cannot be verified"*. Clear the flag once:
->
-> ```sh
-> xattr -d com.apple.quarantine "$(command -v whetuu)"
-> ```
->
-> Downloading with `curl` or `wget` avoids the quarantine attribute entirely.
-
-Check it worked. Running `whetuu` with no arguments prints the command list:
-
-```sh
-whetuu
-whetuu --version
-```
-
-Then wire it into your shell. See [Shell setup](#shell-setup).
-
-### From source
-
-Needs Zig 0.17 (dev). See `minimum_zig_version` in `build.zig.zon` for the exact
-nightly.
+**From source.** Needs Zig 0.17 (dev), see `minimum_zig_version` in
+`build.zig.zon` for the exact nightly:
 
 ```sh
 git clone https://github.com/yamafaktory/whetuu.git
 cd whetuu
-zig build -Doptimize=ReleaseFast
+zig build --release=fast
 sudo mv zig-out/bin/whetuu /usr/local/bin/
 ```
 
@@ -201,7 +211,12 @@ zig build run          # build and run without installing
 
 Maintainers: see [`RELEASING.md`](RELEASING.md) for cutting a release.
 
+</details>
+
 ## Shell setup
+
+The installer already did this. This section is for a manual install, for
+`WHETUU_NO_MODIFY=1`, or for a shell whose config it could not find.
 
 Add the matching line to your shell config, then restart the shell:
 
@@ -224,6 +239,11 @@ eval "$(whetuu init zsh)"
 `whetuu prompt …` on every prompt, passing the last exit status, the command
 duration, and the terminal width.
 
+Run `whetuu init <shell>` by hand and it prints the line above instead, with the
+file it belongs in. Several hundred lines of shell answer nothing when you are
+looking at a terminal. Pipe or substitute it, as the lines above do, and you get
+the script. `whetuu init fish | less` reads it.
+
 ## Usage
 
 Day to day there is nothing to run. The shell hook drives everything, and the
@@ -233,10 +253,11 @@ history picker is on the up arrow. The full command surface:
 |---|---|
 | `whetuu` | Print the command list |
 | `whetuu --version` | Print the version |
-| `whetuu init <fish\|bash\|zsh>` | Print the shell integration script, meant to be `source`d or `eval`ed |
+| `whetuu init <fish\|bash\|zsh>` | Print the shell integration script, meant to be `source`d or `eval`ed. Prints the setup line instead when run straight into a terminal |
 | `whetuu prompt` | Render one prompt. Called by the shell hook, not by you |
 | `whetuu history` | Open the interactive history picker |
 | `whetuu history add -- <command>` | Record a finished command. Called by the shell hook |
+| `whetuu paths` | Print where the history store and version cache live |
 
 `prompt` and `history add` take flags that only the init scripts pass, namely
 exit status, duration and width. That is why they are left out here.

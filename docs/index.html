@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>whetū — an opinionated, zero-config cross-shell prompt written in Zig</title>
+<meta name="description" content="A single compiled binary that renders one curated prompt for fish, bash and zsh. Every module runs at once via std.Io, so a render costs about what its slowest probe costs.">
+<link rel="canonical" href="https://yamafaktory.github.io/whetuu/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://yamafaktory.github.io/whetuu/">
+<meta property="og:title" content="whetū — a zero-config cross-shell prompt in Zig">
+<meta property="og:description" content="One binary, no config file. Git state, 39 toolchains and a syntax-highlighted history picker, in about 2 ms.">
+<meta property="og:image" content="https://yamafaktory.github.io/whetuu/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="whetū — a zero-config cross-shell prompt in Zig">
+<meta name="twitter:description" content="One binary, no config file. Git state, 39 toolchains and a syntax-highlighted history picker, in about 2 ms.">
+<meta name="twitter:image" content="https://yamafaktory.github.io/whetuu/og.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%AD%90%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+/* Four Nerd Font glyphs the prompt actually uses, subsetted out of Meslo LG S
+   Nerd Font Mono (Apache 2.0, see glyphs.LICENSE.txt) — 968 bytes. Nerd Fonts
+   are not on Google Fonts: they are patched builds of upstream families, so
+   the icon glyphs only ship from the Nerd Fonts project itself. The
+   unicode-range keeps this off every character except these four. */
+@font-face {
+  font-family: "Whetu Glyphs";
+  src: url("glyphs.woff2") format("woff2");
+  font-display: block;
+  unicode-range: U+E0A0, U+E6A9, U+F051B, U+F09A5;
+}
+:root {
+  --ground: #0b0a11;
+  --panel: #16141f;
+  --panel-2: #1d1a29;
+  --ink: #ecebf4;
+  --muted: #8f88a6;
+  --rule: #2a2637;
+  --accent: #a855f7;
+  --accent-soft: #d8b4fe;
+  --accent-dim: #3b2455;
+  --c-cmd: #4ade80;
+  --c-flag: #60a5fa;
+  --c-path: #e879f9;
+  --c-str: #fde047;
+  --c-var: #67e8f9;
+  --c-op: #fb7185;
+  --mono: "Whetu Glyphs", "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, "Cascadia Mono", "Liberation Mono", Consolas, monospace;
+  --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --measure: 78ch;
+  --step: clamp(1rem, 0.7rem + 0.8vw, 1.0625rem);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #fcfbff;
+    --panel: #ffffff;
+    --panel-2: #f4f1fa;
+    --ink: #1a1726;
+    --muted: #5d5673;
+    --rule: #e4dff0;
+    --accent: #7c22ce;
+    --accent-soft: #6b21a8;
+    --accent-dim: #ede4fb;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--step);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent-soft); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+img { max-width: 100%; height: auto; display: block; }
+code, kbd { font-family: var(--mono); font-size: 0.9em; }
+
+.wrap { max-width: var(--measure); margin-inline: auto; padding-inline: 1.5rem; }
+
+/* ---- hero ---- */
+.hero { padding-block: clamp(3rem, 9vw, 6rem) clamp(2rem, 5vw, 3.5rem); }
+.wordmark {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: clamp(3.25rem, 13vw, 6rem);
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+  margin: 0;
+  text-wrap: balance;
+}
+.wordmark .mark {
+  color: var(--accent);
+  font-size: 0.92em;
+  letter-spacing: 0;
+  margin-right: 0.22em;
+  vertical-align: -0.04em;
+}
+.say {
+  font-family: var(--mono);
+  font-size: 1rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  margin: 0.9rem 0 0;
+}
+.lede {
+  font-size: clamp(1.15rem, 0.95rem + 0.9vw, 1.45rem);
+  line-height: 1.45;
+  margin: 1.6rem 0 0;
+  text-wrap: balance;
+  max-width: 30ch;
+}
+.sub { color: var(--muted); margin: 1.1rem 0 0; max-width: 54ch; }
+
+/* ---- terminal chrome ----
+   A terminal stays dark in both themes. The ANSI hues below are picked for a
+   dark ground and wash out on white, and the demo GIF underneath is dark too.
+   Re-scoping the tokens here keeps every descendant consistent. */
+.term {
+  --panel: #16141f;
+  --panel-2: #1d1a29;
+  --rule: #2a2637;
+  --ink: #ecebf4;
+  --muted: #8f88a6;
+  --accent: #a855f7;
+  margin-block: 2.5rem 0;
+  background: var(--panel);
+  border-radius: 10px;
+  overflow: hidden;
+  color: var(--ink);
+}
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--panel-2);
+}
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--rule); }
+.term-title {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-left: 0.5rem;
+  letter-spacing: 0.06em;
+}
+.term-body {
+  font-family: var(--mono);
+  font-size: clamp(0.8rem, 0.6rem + 0.6vw, 0.98rem);
+  line-height: 1.75;
+  padding: 1.1rem 1rem;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 2;
+}
+.term-body img { border-radius: 0; }
+.term-flush .term-body { padding: 0; }
+
+.p-dir { color: #22d3ee; font-weight: 700; }
+.p-sep { color: var(--muted); }
+.p-branch { color: var(--c-path); font-weight: 700; }
+.p-state { color: var(--c-str); }
+.p-status { color: var(--c-str); }
+.p-lang { color: #f7a41d; }
+.p-dur { color: var(--muted); }
+.p-star { color: var(--accent); font-weight: 700; }
+.k-cmd { color: var(--c-cmd); }
+.k-flag { color: var(--c-flag); }
+.k-path { color: var(--c-path); }
+.k-str { color: var(--c-str); }
+.k-var { color: var(--c-var); }
+.k-op { color: var(--c-op); }
+.k-time { color: var(--muted); }
+.k-sel { background: var(--accent); color: #fff; display: inline-block; }
+
+/* ---- install command ---- */
+.cmd {
+  display: flex;
+  align-items: stretch;
+  margin-top: 2rem;
+  background: #16141f;
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 100%;
+}
+.cmd code {
+  flex: 1 1 auto;
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  color: #ecebf4;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+  /* The command is longer than the column. Fading the right edge says "there
+     is more, drag it" instead of looking like a truncated string. */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+}
+.cmd code::-webkit-scrollbar { display: none; }
+.cmd .sigil { color: var(--accent); user-select: none; }
+.cmd button {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ecebf4;
+  background: #241f33;
+  border: 0;
+  padding-inline: 1.1rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.cmd button:hover { background: var(--accent); color: #fff; }
+.cmd button[data-done] { color: var(--accent); }
+.cmd button[data-done]:hover { color: #fff; }
+#install .avail { margin-bottom: 2.2rem; }
+.avail { margin: 0.9rem 0 0; font-family: var(--mono); font-size: 0.85rem; color: var(--muted); }
+
+/* ---- actions ---- */
+.actions { display: flex; flex-wrap: wrap; gap: 0.7rem; margin-top: 2rem; }
+.btn {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  padding: 0.6rem 1.05rem;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.btn:hover { border-color: var(--accent); color: var(--ink); background: var(--panel); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn-primary:hover { background: var(--accent-soft); border-color: var(--accent-soft); color: #17091f; }
+
+/* ---- sections ---- */
+section { padding-block: clamp(2.75rem, 7vw, 4.5rem); border-top: 1px solid var(--rule); }
+/* Flex rather than an inline pseudo-element: the emblem is far larger than the
+   label beside it, and only a shared flex line can centre the two against each
+   other independently of either one's font metrics. */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  font-family: var(--mono);
+  font-size: 0.88rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+}
+.eyebrow::before {
+  content: "\0f09a5";
+  color: var(--accent);
+  font-size: 2.9em;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  /* align-items centres the boxes, but this glyph's ink sits low in its own em
+     box. Measured residue at this size, expressed relatively so it holds. */
+  transform: translateY(-0.037em);
+}
+h2 {
+  font-family: var(--mono);
+  font-size: clamp(1.5rem, 1.1rem + 1.5vw, 2.1rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  margin: 0 0 1rem;
+  text-wrap: balance;
+}
+h3 {
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 2rem 0 0.5rem;
+}
+p { margin: 0 0 1rem; }
+section p:last-child { margin-bottom: 0; }
+
+/* ---- module list ---- */
+.mods { display: grid; gap: 0; margin: 1.5rem 0 0; }
+.mod {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: 0.25rem 1.25rem;
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--rule);
+  align-items: baseline;
+}
+.mod:last-child { border-bottom: 1px solid var(--rule); }
+.mod dt { font-family: var(--mono); font-size: 0.95rem; color: var(--accent-soft); }
+.mod dd { margin: 0; color: var(--muted); font-size: 1rem; line-height: 1.55; }
+.mod dd b { color: var(--ink); font-weight: 600; }
+@media (max-width: 34rem) { .mod { grid-template-columns: 1fr; } }
+
+/* ---- keys ---- */
+.keys { list-style: none; padding: 0; margin: 1.5rem 0 0; display: grid; gap: 0.55rem; }
+.keys li { display: grid; grid-template-columns: 8.5rem 1fr; gap: 1rem; align-items: baseline; }
+.keys b { font-family: var(--mono); font-size: 0.92rem; font-weight: 600; color: var(--accent-soft); }
+.keys span { color: var(--muted); font-size: 1rem; }
+@media (max-width: 34rem) { .keys li { grid-template-columns: 1fr; gap: 0.15rem; } }
+
+/* ---- table ---- */
+.scroll { overflow-x: auto; margin-top: 1.5rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.98rem; }
+th, td { text-align: left; padding: 0.65rem 1rem 0.65rem 0; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font-family: var(--mono); font-size: 0.82rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+td { color: var(--muted); }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
+td.first { color: var(--ink); }
+
+/* ---- code ---- */
+pre {
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  line-height: 1.7;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  margin: 0.75rem 0 0;
+}
+pre .c { color: var(--muted); }
+.note {
+  border-left: 2px solid var(--accent);
+  padding: 0.15rem 0 0.15rem 1rem;
+  margin: 1.75rem 0 0;
+  color: var(--muted);
+  font-size: 1rem;
+}
+.note b { color: var(--ink); font-weight: 600; }
+
+/* ---- sticky top bar ----
+   Translucent over a blur so the page reads through it, with the column
+   aligned to the content below. Links scroll sideways on narrow screens
+   rather than being hidden, so every section stays reachable. */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--ground) 86%, transparent);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--rule);
+}
+.nav {
+  max-width: var(--measure);
+  margin-inline: auto;
+  padding: 0.6rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  text-decoration: none;
+  flex: 0 0 auto;
+}
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.15rem;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.nav-links::-webkit-scrollbar { display: none; }
+.nav-links a {
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+.nav-links a:hover, .nav-links a:focus-visible { color: var(--ink); }
+
+/* Keep the clicked section marked. :target matches the section, and :has lets
+   the bar react to it, so this needs no scroll observation and no JavaScript.
+   It follows the hash rather than the scroll position: clicking marks a link,
+   scrolling past it does not. */
+body:has(#install:target) .nav-links a[href="#install"],
+body:has(#demo:target) .nav-links a[href="#demo"],
+body:has(#modules:target) .nav-links a[href="#modules"],
+body:has(#picker:target) .nav-links a[href="#picker"],
+body:has(#performance:target) .nav-links a[href="#performance"],
+body:has(#security:target) .nav-links a[href="#security"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+.brand-mark {
+  display: inline-block;
+  color: var(--accent);
+  font-size: 1.5em;
+  line-height: 1;
+  transform: translateY(-0.037em);
+}
+
+/* Narrow screens: seven links cannot fit, so the bar carries the mark alone
+   and the page is short enough to scroll. */
+@media (max-width: 760px) {
+  .nav { padding-inline: 1rem; }
+  .nav-links { display: none; }
+}
+
+/* Anchored sections should not land flush against the viewport edge. */
+section { scroll-margin-top: 4.5rem; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* The column is wider now so the terminals fit; prose keeps its own measure. */
+section > p, .note, .mod dd, .keys span { max-width: 64ch; }
+
+/* ---- footer ---- */
+footer {
+  border-top: 1px solid var(--rule);
+  padding-block: 2.5rem 3.5rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+footer p { margin: 0 0 0.4rem; }
+.mi { font-family: var(--mono); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+
+
+<header class="site-header">
+  <nav class="nav" aria-label="Primary">
+    <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">󰦥</span>whetū</a>
+    <div class="nav-links">
+      <a href="#install">Install</a>
+      <a href="#demo">Demo</a>
+      <a href="#modules">Modules</a>
+      <a href="#picker">Picker</a>
+      <a href="#performance">Performance</a>
+      <a href="#security">Security</a>
+      <a href="https://github.com/yamafaktory/whetuu">GitHub</a>
+    </div>
+  </nav>
+</header>
+
+<header class="hero wrap" id="top">
+  <h1 class="wordmark"><span class="mark" aria-hidden="true">󰦥</span>whetū</h1>
+  <p class="say">/ˈfɛ.tuː/ &nbsp;·&nbsp; FEH-too &nbsp;·&nbsp; Māori for “star”</p>
+  <p class="lede">An opinionated, zero-config cross-shell prompt written in Zig.</p>
+  <p class="sub">One compiled binary renders one curated prompt, the same for everyone. There is no config file, nothing to theme and nothing to tune. It runs on fish, bash and zsh, and renders in about two milliseconds.</p>
+
+  <div class="term">
+    <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="term-title">~/dev/whetuu</span></div>
+    <div class="term-body"><span class="p-dir">~/dev/whetuu</span> <span class="p-sep">·</span> <span class="p-branch"> main</span> <span class="p-state">(rebasing 2/7)</span> <span class="p-status">[+2 !1 ?3 ⇡1]</span> <span class="p-sep">·</span> <span class="p-lang"> v0.17.0</span> <span class="p-sep">·</span> <span class="p-dur">󰔛 4s</span>
+<span class="p-star">󰦥</span> </div>
+  </div>
+
+  <div class="actions">
+    <a class="btn btn-primary" href="#install">Install</a>
+    <a class="btn" href="https://github.com/yamafaktory/whetuu">Source on GitHub</a>
+  </div>
+  <p class="avail">One command. macOS and Linux · fish, bash and zsh</p>
+</header>
+
+<main>
+
+<section class="wrap" id="install">
+  <p class="eyebrow">~/install</p>
+  <h2>One command</h2>
+
+  <p><b>1.</b> Run it. The installer detects your platform, checks the download against the published <code>SHA256SUMS</code>, puts the binary in <code>~/.whetuu/bin</code>, and adds two lines to the config of the shell you actually use. Running it twice changes nothing.</p>
+  <div class="cmd">
+    <code><span class="sigil">$</span> curl --proto '=https' --tlsv1.2 -fsSL https://yamafaktory.github.io/whetuu/install.sh | sh</code>
+    <button type="button" data-copy="curl --proto &#39;=https&#39; --tlsv1.2 -fsSL https://yamafaktory.github.io/whetuu/install.sh | sh">Copy</button>
+  </div>
+  <p class="avail">macOS and Linux · <a href="https://yamafaktory.github.io/whetuu/install.sh">read the script</a> · <a href="https://github.com/yamafaktory/whetuu/releases/latest">tarballs and checksums</a></p>
+
+  <p><b>2.</b> Open a new shell. That is the whole install.</p>
+  <p class="note">Would rather edit your own dotfiles? Run it with <code>WHETUU_NO_MODIFY=1</code> and it prints the two lines instead of writing them. <code>whetuu init &lt;shell&gt;</code> prints them too, along with the file they belong in. Uninstalling is <code>rm -rf ~/.whetuu</code> plus those lines.</p>
+
+  <p class="note"><b>You need a <a href="https://www.nerdfonts.com/">Nerd Font</a>.</b> The prompt uses Nerd Font glyphs for the git branch, the language logos and the prompt character. Without one, those show as empty boxes.</p>
+</section>
+<section class="wrap" id="demo">
+  <p class="eyebrow">~/demo</p>
+  <h2>See it in a real shell</h2>
+  <p>The prompt tracks the branch, the git status and the toolchain version. Pressing the up arrow opens the history picker, which filters as you type and runs what you pick.</p>
+  <div class="term term-flush">
+    <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="term-title">demo</span></div>
+    <div class="term-body"><img src="demo.gif" width="905" height="560" alt="A terminal session. The prompt tracks the branch, git status and toolchain version. The history picker then filters and runs a command."></div>
+  </div>
+</section>
+<section class="wrap" id="modules">
+  <p class="eyebrow">~/modules</p>
+  <h2>What it shows</h2>
+  <p>Left to right, each segment appears only when it is relevant.</p>
+  <dl class="mods">
+    <div class="mod"><dt>user_host</dt><dd><b>user@host</b> in bold green, but only over SSH or when you are root, and then in bold red as a warning.</dd></div>
+    <div class="mod"><dt>directory</dt><dd>The current directory with <b>$HOME</b> collapsed to <b>~</b>. Keeps the anchor plus as many trailing directories as fit the width.</dd></div>
+    <div class="mod"><dt>git branch</dt><dd>Branch glyph and current branch, or <b>(detached)</b>, in magenta.</dd></div>
+    <div class="mod"><dt>git state</dt><dd>Any operation underway, in yellow: <b>(rebasing 2/7)</b>, <b>(merging)</b>, <b>(cherry-picking)</b>. Read straight from <b>.git</b>, with no extra subprocess.</dd></div>
+    <div class="mod"><dt>git status</dt><dd>Conflicts, stashes, staged, modified, untracked, ahead and behind, in one bracketed group.</dd></div>
+    <div class="mod"><dt>language</dt><dd>Logo and toolchain version in the brand colour, for <b>39 languages and tools</b>. Detected from a project manifest, a source file extension, or an infra marker.</dd></div>
+    <div class="mod"><dt>cmd_duration</dt><dd>Timer glyph and elapsed time, when the last command ran for two seconds or more.</dd></div>
+    <div class="mod"><dt>character</dt><dd>A star, purple by default or in the language brand colour. Turns red after a failed command.</dd></div>
+  </dl>
+</section>
+<section class="wrap" id="picker">
+  <p class="eyebrow">~/picker</p>
+  <h2>A history picker on the up arrow</h2>
+  <p>Commands are recorded once they finish, and only when they exited cleanly, so typos never clutter the list. Each is stored with the directory it ran in. The picker opens scoped to the current directory and falls back to all history when there is none.</p>
+
+  <div class="term">
+    <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="term-title">whetuu history</span></div>
+    <div class="term-body"><span class="k-time">  2d</span> <span class="k-cmd">git</span> commit <span class="k-flag">-m</span> <span class="k-str">"Cache toolchain versions"</span>
+<span class="k-time">  1d</span> <span class="k-cmd">cd</span> <span class="k-path">~/cf/platform</span> <span class="k-op">&amp;&amp;</span> <span class="k-cmd">git</span> push <span class="k-flag">-u</span> origin HEAD
+<span class="k-time"> 17h</span> <span class="k-cmd">docker</span> exec <span class="k-flag">-i</span> <span class="k-var">PGPASSWORD=</span>x db psql
+<span class="k-time"> 14m</span> <span class="k-cmd">nvim</span> <span class="k-path">~/.config/fish/config.fish</span>
+<span class="k-sel"> 11m npm ci                                                 </span>
+<span class="p-star">󰦥</span> </div>
+  </div>
+
+  <p class="note"><b>Rows are syntax highlighted.</b> The command name, flags, paths, variables, quoted strings and operators each take a colour from your terminal theme, so the picker matches the palette you already run. A command too wide for the window loses its middle to a <b>…</b> rather than its end, which keeps a run of commands sharing one long prefix apart.</p>
+
+  <ul class="keys">
+    <li><b>type</b><span>Filter. Every word must match, ignoring case.</span></li>
+    <li><b>↑ / ↓</b><span>Move the selection. Up goes further back in time.</span></li>
+    <li><b>Ctrl+G</b><span>Switch between this directory's history and all of it.</span></li>
+    <li><b>Tab</b><span>Copy the selection into the search field to edit or extend.</span></li>
+    <li><b>Enter</b><span>Run it. When nothing matches any more, runs the text as typed.</span></li>
+    <li><b>Esc</b><span>Cancel, leaving whatever you had typed on the command line.</span></li>
+  </ul>
+</section>
+<section class="wrap" id="performance">
+  <p class="eyebrow">~/performance</p>
+  <h2>Renders in about 2 ms</h2>
+  <p>A prompt runs before every command, which makes it the one thing in your shell that has to be quick. Every module that reads the disk runs at the same time via <code>std.Io</code>, so a render takes about as long as its slowest probe rather than the sum of them all.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Directory</th><th>Render</th><th>For comparison</th></tr></thead>
+      <tbody>
+        <tr><td class="first">No repo, no toolchain</td><td class="num">2.3 ms</td><td>—</td></tr>
+        <tr><td class="first">Zig repo, 35 files</td><td class="num">3.0 ms</td><td><code>zig version</code> alone: 3.1 ms</td></tr>
+        <tr><td class="first">Monorepo, 8259 files</td><td class="num">20.2 ms</td><td><code>git status</code> alone: 19.3 ms</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Measured with <code>hyperfine --warmup 40 --runs 400</code> on a 13th gen i9-13900H, ReleaseFast, pinned to the performance cores on an otherwise idle machine. In the monorepo the whole prompt takes about as long as <code>git status</code> on its own.</p>
+  <p class="note"><b>A slow repository cannot hang your shell.</b> Both subprocesses are bounded. Git gets 250 ms and the toolchain probe gets 200 ms, and they run at the same time, so the worst case is the larger of the two. Given a git that hangs for 30 seconds, the prompt still returns in 257 ms. It simply drops the git segment.</p>
+</section>
+<section class="wrap" id="security">
+  <p class="eyebrow">~/security</p>
+  <h2>Nothing leaves your machine</h2>
+  <p>A prompt sees every command you run, and the picker keeps them. That is a lot to hand a small tool, so here is exactly what whetuu does and does not do.</p>
+  <dl class="mods">
+    <div class="mod"><dt>No network</dt><dd>There is no socket, no HTTP client and no sync anywhere in the binary. No telemetry and no update check. There is no account and no server to opt out of.</dd></div>
+    <div class="mod"><dt>Two files</dt><dd>Running, whetuu writes exactly two. The history store, created with mode <b>600</b> and reset to it on every write, so one left readable by an older version corrects itself. And a cache of toolchain version strings at <b>~/.cache/whetuu/versions</b>, which holds nothing else and can be deleted whenever you like.</dd></div>
+    <div class="mod"><dt>Data outside it</dt><dd>Both files follow the XDG base directory spec, so neither lives in the install directory. Removing whetuu with <b>rm -rf ~/.whetuu</b> cannot take your history with it. <b>whetuu paths</b> prints both locations.</dd></div>
+    <div class="mod"><dt>One install edit</dt><dd>The installer appends two lines to the config of the shell in <b>$SHELL</b>, and nothing else. Not the config of a shell you do not use, and never twice. <b>WHETUU_NO_MODIFY=1</b> makes it print them instead. Everything lands in <b>~/.whetuu</b>, so removing it is one directory.</dd></div>
+    <div class="mod"><dt>Skip a command</dt><dd>Start a command with a space and it is never recorded. Use it for the ones carrying a token. Only successful commands are stored at all.</dd></div>
+    <div class="mod"><dt>No shell, ever</dt><dd>whetuu runs two subprocesses: <b>git</b> and the toolchain version probe. Both get a fixed list of arguments rather than a command line, so nothing you type is ever interpreted as a command. State like a rebase in progress is read straight out of <b>.git</b> with no subprocess at all.</dd></div>
+    <div class="mod"><dt>Escapes defanged</dt><dd>Every control byte in a command, a branch name or a directory becomes a <b>?</b> before it reaches your terminal. A repository you just cloned cannot repaint your screen or move your cursor through whetuu.</dd></div>
+    <div class="mod"><dt>Nothing to configure</dt><dd>No config file means no config parser, no theme format and nothing of yours being executed at startup. The attack surface is the binary and the two commands above.</dd></div>
+    <div class="mod"><dt>One caveat</dt><dd>The language module picks which toolchain to probe from the files in the current directory, so entering an untrusted repository can make whetuu run something like <b>node --version</b>. It runs whatever your <b>PATH</b> resolves, never a binary from the repository.</dd></div>
+    <div class="mod"><dt>Checkable downloads</dt><dd>The Linux builds are static musl with no runtime dependencies, and every release ships a <b>SHA256SUMS</b> file. The source is <a href="https://github.com/yamafaktory/whetuu">on GitHub</a> and builds from it with one command.</dd></div>
+  </dl>
+</section>
+
+
+
+
+
+
+</main>
+
+<footer class="wrap">
+  <p class="mi">whetū · MIT licensed · built in Zig by <a href="https://github.com/yamafaktory">yamafaktory</a></p>
+  <p class="mi"><a href="https://github.com/yamafaktory/whetuu">Source</a> · <a href="https://github.com/yamafaktory/whetuu/releases">Releases</a> · <a href="https://github.com/yamafaktory/whetuu/issues">Issues</a></p>
+</footer>
+
+<script>
+// The only script on the page: a copy button needs the clipboard API.
+document.querySelectorAll(".cmd button").forEach(function (b) {
+  b.addEventListener("click", function () {
+    navigator.clipboard.writeText(b.dataset.copy).then(function () {
+      b.textContent = "Copied";
+      b.setAttribute("data-done", "");
+      setTimeout(function () {
+        b.textContent = "Copy";
+        b.removeAttribute("data-done");
+      }, 1600);
+    });
+  });
+});
+</script>
+</body>
+</html>

@@ -99,7 +99,11 @@ with personal habit, Zig wins.
    output format, shell integration, storage paths) must be reflected there in
    the same change; also fix any statement the change has made stale. Only
    purely internal refactors leave the README untouched.
-4. Build for local testing: `zig build --release=fast`. This installs an
+4. Reconcile `docs/index.html` too. It is the landing page, and it repeats the
+   install steps, the performance table and the security claims. A change that
+   touches any of those has to move both, or the site starts contradicting the
+   README.
+5. Build for local testing: `zig build --release=fast`. This installs an
    optimized `zig-out/bin/whetuu`, which is what I try the change with in a real
    shell. Do this on every change, not just user-visible ones.
 
@@ -145,3 +149,27 @@ by someone deciding whether to use whetuu, so it has to be plain.
 
 The published target list lives in `release_targets` in `build.zig`, and both CI
 workflows call `zig build release`, so it is the only place a target is named.
+
+## The site
+
+`docs/` is served by GitHub Pages at `https://yamafaktory.github.io/whetuu/`.
+
+- `index.html` — the landing page. One file, styles inlined, no framework. The
+  only script is the copy button. The only third party is Google Fonts, for IBM
+  Plex.
+- `install.sh` — the installer behind the `curl` one liner in the README. It
+  resolves the latest release, verifies it against `SHA256SUMS`, installs to
+  `~/.whetuu/bin`, and appends two lines to the config of the shell in `$SHELL`.
+  Never uses sudo, because sudo cannot read a password when the script arrives
+  through a pipe.
+- `glyphs.woff2` — four Nerd Font glyphs the page renders, subsetted out of
+  Meslo LG S Nerd Font Mono. Add a glyph to the page and this needs rebuilding.
+- `.nojekyll` — stops Pages running the files through Jekyll.
+
+Test `install.sh` by serving the directory and piping it, which is the only
+shape that catches the pipe specific bugs:
+
+```sh
+python3 -m http.server -d docs 8099
+curl -fsSL http://localhost:8099/install.sh | HOME=/tmp/fakehome SHELL=/usr/bin/fish sh
+```
