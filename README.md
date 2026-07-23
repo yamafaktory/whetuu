@@ -14,8 +14,9 @@ is an *f* sound, not a *w*. The macron in `ū` makes that vowel long, which is
 why the ASCII spelling doubles it.
 
 There is nothing to configure. One compiled binary renders one curated prompt,
-the same for everyone. Every module runs at the same time via `std.Io`, so a
-render costs about what its slowest probe costs. See [Performance](#performance).
+the same for everyone. Every module that reads the disk runs at the same time
+via `std.Io`, so a render costs about what its slowest probe costs. See
+[Performance](#performance).
 
 > **Requires a [Nerd Font](https://www.nerdfonts.com/).** The prompt uses Nerd
 > Font glyphs for the git branch, language logos, and the prompt character.
@@ -43,22 +44,25 @@ Left to right, each shown only when relevant:
 
 A prompt runs before every command, so you pay its cost constantly. Numbers from
 `hyperfine --warmup 40 --runs 400` on a 13th gen i9-13900H, ReleaseFast build,
-with the toolchain version cache warm:
+with the toolchain version cache warm, pinned to the performance cores on an
+otherwise idle machine:
 
 | Directory | Render | For comparison |
 |---|---|---|
-| No repo, no toolchain | **3.7 ms** ± 1.0 | — |
-| Zig repo, 33 files | **6.2 ms** ± 3.1 | `zig version` alone: 8.5 ms |
-| Monorepo, 8079 files | **33.2 ms** ± 7.5 | `git status` alone: 32.6 ms |
+| No repo, no toolchain | **2.3 ms** ± 0.7 | — |
+| Zig repo, 35 files | **3.0 ms** ± 0.9 | `zig version` alone: 3.1 ms |
+| Monorepo, 8259 files | **20.2 ms** ± 2.5 | `git status` alone: 19.3 ms |
 
-Two things do most of the work. Modules overlap, so a render costs about what
-its slowest probe costs rather than the sum of all of them. In the monorepo the
+Two things do most of the work. The probes overlap, so a render costs about what
+the slowest one costs rather than the sum of all of them. In the monorepo the
 whole prompt takes about as long as `git status` on its own.
 
 Toolchain versions are also cached, keyed on the binary path, mtime and size.
-That is why the Zig repo renders faster than a single `zig version` call. The
-first prompt in a project pays for the probe. Later ones read a small file
+The first prompt in a project pays for the probe. Later ones read a small file
 instead. Upgrading a toolchain changes its mtime, which drops the stale entry.
+What that saves depends on the toolchain. A slow `--version` call is well worth
+skipping. A fast one is already hidden behind the git probe running alongside
+it, which is why the Zig repo above lands within noise of `zig version` itself.
 
 Reproduce it with:
 
@@ -66,6 +70,10 @@ Reproduce it with:
 hyperfine --warmup 40 --runs 400 \
   'whetuu prompt --shell fish --status 0 --duration-ms 0 --width 100'
 ```
+
+Pin the run on a laptop that mixes performance and efficiency cores, with
+`taskset -c 0-11` on Linux or its equivalent. Left to the scheduler, the same
+measurement spreads across a factor of two and tells you nothing.
 
 **A slow repository cannot hang your shell.** Both subprocesses are bounded. The
 `git` call gets 250 ms and the toolchain probe gets 200 ms. They run at the same
