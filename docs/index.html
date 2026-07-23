@@ -524,7 +524,7 @@ footer p { margin: 0 0 0.4rem; }
 <section class="wrap" id="picker">
   <p class="eyebrow">~/picker</p>
   <h2>A history picker on the up arrow</h2>
-  <p>Commands are recorded once they finish, and only when they exited cleanly, so typos never clutter the list. Each is stored with the directory it ran in. The picker opens scoped to the current directory and falls back to all history when there is none.</p>
+  <p>Commands are recorded once they finish, and only when they exited cleanly, so typos never enter the store. Each is stored with the directory it ran in. The picker opens scoped to the current directory and falls back to all history when there is none. The command that just broke is the one exception. It sits at the top in red until you run another command, so you can pick it and fix it. It is never stored.</p>
 
   <div class="term">
     <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="term-title">whetuu history</span></div>

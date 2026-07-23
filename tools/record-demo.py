@@ -143,10 +143,23 @@ def main():
         drain(0.6)
         line("sleep 2", 3.2)                    # cmd_duration appears
         drain(0.6)
-        line("false", 1.4)                      # star turns red
-        drain(1.0)
-        line("git log --oneline -1", 1.4)       # star back to purple
-        drain(1.0)
+
+        # A typo fails, turning the star red. The next up-arrow brings it back at
+        # the top of the picker in red, so it is fixed on the search line rather
+        # than retyped. Running the fix clears it and returns the star to purple.
+        line("gti status", 1.6)                 # unknown command: fails, star red
+        drain(0.8)
+        os.write(fd, b"\x1b[A")                 # up-arrow: the failed command, red
+        drain(2.4)
+        os.write(fd, b"\t")                     # copy it onto the search line
+        drain(1.4)
+        for _ in range(len("gti status ")):     # clear the copied text
+            os.write(fd, b"\x7f")
+            drain(0.07)
+        send("git status", 0.08)                # retype it correctly
+        drain(1.8)
+        os.write(fd, b"\r")                      # run the fix (succeeds)
+        drain(1.8)
 
         # The history picker, shown properly: open, navigate, toggle scope,
         # filter, run.

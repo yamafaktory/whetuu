@@ -275,9 +275,14 @@ that variable is set. macOS uses the same path rather than `~/Library`, so the
 store stays put when you share a dotfiles setup across machines.
 
 A command is recorded once it finishes, and only when it exited with status 0.
-Typos and failed runs never clutter the picker. Prefix a command with a space to
+Typos and failed runs never enter the store. Prefix a command with a space to
 keep it out of the store entirely. Every command is stored together with the
 directory it ran in.
+
+The command that just broke is not lost. When a command does not exit 0, it
+appears at the top of the picker, in red. Pick it to fix and run it again.
+Cancel and it is still there the next time you open the picker. It lives in
+memory until you run another command, and never reaches the store.
 
 All three integrations bind the **up arrow** to the picker. Anything already
 typed on the command line carries over into the search field. The picker opens

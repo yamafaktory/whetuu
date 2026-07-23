@@ -124,10 +124,12 @@ fn runPrompt(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: 
 
 /// Handles the `history` subcommand: `history add [--status N] -- <command>`
 /// records a command (dropped unless its exit status is 0, so only commands
-/// that ran successfully are stored), while `history [--query <text>]` opens
-/// the interactive picker — seeded with `text`, the shell's current command
-/// line — and prints the chosen command to stdout for the shell to place on
-/// the command line.
+/// that ran successfully are stored), while `history [--query <text>]
+/// [--last <command>]` opens the interactive picker — seeded with `text`, the
+/// shell's current command line — and prints the chosen command to stdout for
+/// the shell to place on the command line. `--last` is the command that just
+/// failed, shown marked at the top and never stored, so the thing that broke
+/// can be recalled without cluttering the store.
 fn runHistory(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: []const [:0]const u8) !void {
     const xdg = environ.get("XDG_DATA_HOME") orelse "";
     const home = environ.get("HOME") orelse "";
@@ -148,15 +150,39 @@ fn runHistory(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args:
         return history.add(io, arena, path, try std.mem.join(arena, " ", parts), cwd, unixNow(io));
     }
 
-    const initial = if (args.len >= 2 and std.mem.eql(u8, args[0], "--query")) args[1] else "";
-    const items = try history.load(io, arena, path);
-    const chosen = picker.pick(io, arena, items, .{ .initial = initial, .cwd = cwd, .home = home }) orelse return;
+    const opts = try cli.parseHistoryPick(args);
+    const loaded = try history.load(io, arena, path);
+    // The failure keeps the time it ran, so its age counts up across picker
+    // opens instead of resetting to zero each time. A missing stamp means now.
+    const failed_at = if (opts.last_at > 0) opts.last_at else unixNow(io);
+    const items = try withLastFailure(arena, loaded, opts.last, cwd, failed_at);
+    const chosen = picker.pick(io, arena, items, .{ .initial = opts.query, .cwd = cwd, .home = home }) orelse return;
 
     var buf: [4096]u8 = undefined;
     var fw = Io.File.stdout().writer(io, &buf);
     try fw.interface.writeAll(chosen);
     try fw.interface.writeByte('\n');
     try fw.interface.flush();
+}
+
+/// Prepends the just-failed command as an ephemeral, most-recent entry the
+/// picker marks and never stores, so the command that just broke can be picked
+/// and edited without cluttering the store. A stored duplicate in the same
+/// directory is dropped so the command appears once, marked. An empty or
+/// whitespace-only `last` — no failure, or the shell's slot was clear — returns
+/// `loaded` untouched.
+fn withLastFailure(arena: Allocator, loaded: []const history.Entry, last: []const u8, cwd: []const u8, failed_at: i64) ![]const history.Entry {
+    const command = std.mem.trim(u8, last, " \t\r\n");
+    if (command.len == 0) return loaded;
+
+    var out: std.ArrayList(history.Entry) = .empty;
+    try out.ensureTotalCapacity(arena, loaded.len + 1);
+    out.appendAssumeCapacity(.{ .command = command, .cwd = cwd, .timestamp = failed_at, .failed = true });
+    for (loaded) |entry| {
+        if (std.mem.eql(u8, entry.cwd, cwd) and std.mem.eql(u8, entry.command, command)) continue;
+        out.appendAssumeCapacity(entry);
+    }
+    return out.toOwnedSlice(arena);
 }
 
 /// Current wall-clock time as unix seconds, used to stamp and age history.
@@ -241,4 +267,33 @@ test "paths reports both files, and says so when there is nowhere to write" {
 
     try std.testing.expect((try history.storePath(a, "", "")) == null);
     try std.testing.expect((try version_cache.path(a, "", "")) == null);
+}
+
+test "withLastFailure prepends the failure once, marked, dropping a same-dir duplicate" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const loaded = [_]history.Entry{
+        .{ .command = "zig build", .cwd = "/w", .timestamp = 20 },
+        .{ .command = "ls", .cwd = "/w", .timestamp = 10 },
+    };
+
+    // The failed command sits first, marked, and its earlier success in the same
+    // directory is dropped so it appears once.
+    const with = try withLastFailure(a, &loaded, "zig build", "/w", 30);
+    try std.testing.expectEqual(@as(usize, 2), with.len);
+    try std.testing.expectEqualStrings("zig build", with[0].command);
+    try std.testing.expect(with[0].failed);
+    try std.testing.expectEqual(@as(i64, 30), with[0].timestamp);
+    try std.testing.expectEqualStrings("ls", with[1].command);
+
+    // The same command in another directory is a different entry and stays.
+    const other = try withLastFailure(a, &loaded, "zig build", "/x", 30);
+    try std.testing.expectEqual(@as(usize, 3), other.len);
+    try std.testing.expect(other[0].failed);
+
+    // No failure (empty or blank slot) leaves the loaded list untouched.
+    try std.testing.expectEqual(@as(usize, 2), (try withLastFailure(a, &loaded, "", "/w", 30)).len);
+    try std.testing.expectEqual(@as(usize, 2), (try withLastFailure(a, &loaded, "   ", "/w", 30)).len);
 }

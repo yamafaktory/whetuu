@@ -2,6 +2,8 @@
 # Requires bash 5+ for EPOCHREALTIME (microsecond wall clock).
 
 __whetuu_start=""
+__whetuu_failed=""
+__whetuu_failed_at=""
 
 # Record a start time before each interactive command. Skip completion and the
 # precmd hook itself so they are not measured.
@@ -36,6 +38,17 @@ __whetuu_record() {
     [[ -z "$num" || "$num" == "$__whetuu_last_hist" ]] && return
     __whetuu_last_hist="$num"
     command whetuu history add --status "$1" -- "$cmd"
+    # Keep a command that did not exit 0 so the picker can show it at the top
+    # without storing it, until the next command finishes. A clean run clears the
+    # slot. A leading space is already dropped by ignorespace, so such a command
+    # never reaches here to be kept.
+    if [[ "$1" -eq 0 ]]; then
+        __whetuu_failed=""
+        __whetuu_failed_at=""
+    else
+        __whetuu_failed="$cmd"
+        __whetuu_failed_at="$EPOCHSECONDS"
+    fi
 }
 
 __whetuu_precmd() {
@@ -53,8 +66,10 @@ PROMPT_COMMAND=__whetuu_precmd
 
 # Up arrow opens the whetuu history picker and runs the chosen command right
 # away, the same as the fish and zsh integrations. Anything already typed seeds
-# the picker's search field. The picker draws on /dev/tty, so its stdout is only
-# the choice.
+# the picker's search field, and the last failed command is passed with --last
+# so it appears marked at the top. Cancelling leaves the slot alone, so the
+# failed command is still offered next time. The picker draws on /dev/tty, so its
+# stdout is only the choice.
 #
 # A `bind -x` function cannot run a command itself, so the key expands to a
 # two-step macro: the function first, then a follow-up key. The function decides
@@ -63,7 +78,7 @@ PROMPT_COMMAND=__whetuu_precmd
 # reads it, so rebinding from inside the function takes effect in time.
 __whetuu_history() {
     local picked
-    picked=$(command whetuu history --query "$READLINE_LINE" </dev/tty)
+    picked=$(command whetuu history --query "$READLINE_LINE" --last "$__whetuu_failed" --last-at "$__whetuu_failed_at" </dev/tty)
     if [[ -n "$picked" ]]; then
         READLINE_LINE="$picked"
         READLINE_POINT=${#READLINE_LINE}
