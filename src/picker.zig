@@ -37,6 +37,11 @@ const time_width = 4;
 const ellipsis = "…";
 const ellipsis_width = 1;
 
+/// The cursor is parked on the search line, so it is hidden for the redraw that
+/// walks past every row to get back there.
+const hide_cursor = "\x1b[?25l";
+const show_cursor = "\x1b[?25h";
+
 /// Terminal dimensions, with sane fallbacks when the size cannot be queried.
 const Size = struct {
     cols: u16,
@@ -87,11 +92,15 @@ pub const Options = struct {
 /// appended; Enter returns the selected entry, or the query text itself when
 /// nothing matches it. Entry ages are re-read from the clock on every frame
 /// and the key read times out once a second, so the time column stays live
-/// while the picker idles. Per-frame allocations (the filtered list and the
-/// frame buffer) come from a scratch arena reset every iteration, so an idle
-/// picker's memory stays bounded no matter how long it ticks; only the query
-/// and the returned command live on `arena`. The terminal is always restored
-/// on exit.
+/// while the picker idles.
+///
+/// Three arenas keep an idle picker from growing or from touching the terminal
+/// for no reason. The frame buffer comes from a scratch arena reset every
+/// iteration. The filtered list comes from its own arena, reset only when the
+/// query or the scope actually moves, so a tick costs no filtering at all. The
+/// last frame written is kept on `arena` and compared against the next one, so
+/// a redraw that would change nothing is never sent. The terminal is always
+/// restored on exit.
 pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]const u8 {
     if (items.len == 0) return null;
 
@@ -104,26 +113,47 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
     defer posix.tcsetattr(fd, .FLUSH, original) catch {};
 
     writeAll(io, tty, "\x1b[?1049h");
-    defer writeAll(io, tty, "\x1b[?1049l");
+    defer writeAll(io, tty, "\x1b[?1049l" ++ show_cursor);
 
     var frame_arena: std.heap.ArenaAllocator = .init(arena);
+    var list_arena: std.heap.ArenaAllocator = .init(arena);
+    var drawn: std.ArrayList(u8) = .empty;
     var query: std.ArrayList(u8) = .empty;
     query.appendSlice(arena, opts.initial) catch {};
     var scope = initialScope(items, opts.cwd);
     var selected: usize = 0;
     var base: usize = 0;
     var input: Input = .{};
+    var shown: []const Entry = &.{};
+    var refilter = true;
 
     while (true) {
         _ = frame_arena.reset(.retain_capacity);
         const scratch = frame_arena.allocator();
         const now = Io.Clock.now(.real, io).toSeconds();
         const term = size(io, tty);
-        const shown = filter(scratch, items, query.items, scope, opts.cwd) catch items;
+
+        if (refilter) {
+            _ = list_arena.reset(.retain_capacity);
+            shown = filter(list_arena.allocator(), items, query.items, scope, opts.cwd) catch items;
+            refilter = false;
+        }
         if (selected >= shown.len) selected = if (shown.len == 0) 0 else shown.len - 1;
 
-        const bar = scopeBar(scratch, scope, opts.cwd, opts.home, term.cols / 3) catch null;
-        render(io, scratch, tty, query.items, shown, selected, &base, term, now, bar);
+        const list_rows: usize = if (term.rows > 2) term.rows - 2 else 1;
+        if (selected < base) base = selected;
+        if (selected >= base + list_rows) base = selected + 1 - list_rows;
+
+        render(io, scratch, arena, tty, &drawn, .{
+            .query = query.items,
+            .shown = shown,
+            .selected = selected,
+            .base = base,
+            .list_rows = list_rows,
+            .cols = term.cols,
+            .now = now,
+            .bar = scopeBar(scratch, scope, opts.cwd, opts.home, term.cols / 3) catch null,
+        });
 
         switch (input.next(fd)) {
             .up => {
@@ -140,20 +170,23 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
                 query.appendSlice(arena, shown[selected].command) catch {};
                 query.append(arena, ' ') catch {};
                 selected = 0;
+                refilter = true;
             },
             .backspace => {
-                _ = query.pop();
+                if (query.pop() != null) refilter = true;
                 selected = 0;
             },
             .char => |c| {
                 query.append(arena, c) catch {};
                 selected = 0;
+                refilter = true;
             },
             .scope => {
                 if (opts.cwd.len == 0) continue;
 
                 scope = if (scope == .dir) .all else .dir;
                 selected = 0;
+                refilter = true;
             },
             .cancel => return null,
             .tick, .other => {},
@@ -225,10 +258,17 @@ fn dirLabel(arena: Allocator, cwd: []const u8, home: []const u8, max: usize) All
     return std.fmt.allocPrint(arena, "…{s}", .{tail(collapsed, max -| 1)});
 }
 
-/// The suffix of `text` that fits `cols` columns, cut on a UTF-8 boundary.
+/// The suffix of `text` that fits `cols` columns, cut on a UTF-8 boundary. The
+/// mirror of `head`. Measures once and then skips the excess, rather than
+/// re-measuring the remainder per column dropped — middle elision calls this on
+/// exactly the longest rows, where that difference is quadratic.
 fn tail(text: []const u8, cols: usize) []const u8 {
+    const total = width(text);
+    if (total <= cols) return text;
+
     var start: usize = 0;
-    while (width(text[start..]) > cols) {
+    var skip = total - cols;
+    while (skip > 0) : (skip -= 1) {
         start += 1;
         while (start < text.len and text[start] & 0xc0 == 0x80) start += 1;
     }
@@ -429,45 +469,76 @@ test "a burst mixing text and control keys decodes in order" {
 /// Draws the whole frame in one write. `base` is the newest index currently
 /// visible (the bottom list row), carried across frames so the viewport scrolls
 /// while keeping the selection on screen.
-fn render(io: Io, arena: Allocator, tty: Io.File, query: []const u8, shown: []const Entry, selected: usize, base: *usize, term: Size, now: i64, bar: ?ScopeBar) void {
-    const list_rows: usize = if (term.rows > 2) term.rows - 2 else 1;
-    if (selected < base.*) base.* = selected;
-    if (selected >= base.* + list_rows) base.* = selected + 1 - list_rows;
-
+/// `drawn` holds the bytes last written and lives on the long-lived `arena`,
+/// which is what lets an unchanged frame be skipped. When remembering it fails
+/// the buffer is cleared rather than left stale: an empty buffer matches no
+/// frame, costing one redundant write instead of a missed redraw.
+fn render(io: Io, scratch: Allocator, arena: Allocator, tty: Io.File, drawn: *std.ArrayList(u8), fr: Frame) void {
     var f: std.ArrayList(u8) = .empty;
-    frame(arena, &f, query, shown, selected, base.*, list_rows, term.cols, now, bar) catch return;
+    fr.build(scratch, &f) catch return;
+    if (std.mem.eql(u8, drawn.items, f.items)) return;
+
     writeAll(io, tty, f.items);
+    drawn.clearRetainingCapacity();
+    drawn.appendSlice(arena, f.items) catch drawn.clearRetainingCapacity();
 }
 
-/// Builds the frame bytes into `f`. Split from `render` so a formatting failure
-/// simply skips the frame rather than corrupting the terminal.
-fn frame(arena: Allocator, f: *std.ArrayList(u8), query: []const u8, shown: []const Entry, selected: usize, base: usize, list_rows: usize, cols: u16, now: i64, bar: ?ScopeBar) !void {
-    try f.appendSlice(arena, "\x1b[H\x1b[2J");
+/// Everything one frame is drawn from. Grouped so `render` and `build` stay
+/// readable, and so a frame can be compared against the last one as data.
+const Frame = struct {
+    query: []const u8,
+    shown: []const Entry,
+    selected: usize,
+    base: usize,
+    list_rows: usize,
+    cols: u16,
+    now: i64,
+    bar: ?ScopeBar,
 
-    // Scope bar pinned to the top row, right-aligned, skipped when it cannot
-    // fit.
-    if (bar) |b| {
-        if (cols > b.cols) {
-            try f.appendSlice(arena, try std.fmt.allocPrint(arena, "\x1b[{d}G", .{cols - b.cols + 1}));
-            try f.appendSlice(arena, b.text);
+    /// Builds the frame bytes into `f`. Split from `render` so a formatting
+    /// failure simply skips the frame rather than corrupting the terminal.
+    ///
+    /// Every line clears itself as it is drawn rather than the whole screen
+    /// being erased up front. A full erase leaves the terminal free to present
+    /// a blank screen before the repaint lands; erasing one line at a time
+    /// bounds that to the line being rewritten. The cursor is hidden for the
+    /// same reason, so it is not dragged down the list on every frame.
+    ///
+    /// The top line is cleared whole (`\x1b[2K`), since the scope bar jumps
+    /// past the left of it without writing there. List rows clear from the
+    /// cursor on (`\x1b[K`), which is safe because every row ends with a reset
+    /// — erasing under an active background would smear the selected row's
+    /// purple to the edge.
+    fn build(fr: Frame, arena: Allocator, f: *std.ArrayList(u8)) !void {
+        try f.appendSlice(arena, hide_cursor ++ "\x1b[H");
+
+        // Scope bar pinned to the top row, right-aligned, skipped when it cannot
+        // fit.
+        try f.appendSlice(arena, "\x1b[2K");
+        if (fr.bar) |b| {
+            if (fr.cols > b.cols) {
+                try f.appendSlice(arena, try std.fmt.allocPrint(arena, "\x1b[{d}G", .{fr.cols - b.cols + 1}));
+                try f.appendSlice(arena, b.text);
+            }
         }
-    }
 
-    try f.appendSlice(arena, "\r\n");
-
-    var row: usize = 0;
-    while (row < list_rows) : (row += 1) {
-        const idx = base + (list_rows - 1 - row);
-        if (idx < shown.len) try appendEntry(arena, f, shown[idx], now, idx == selected, cols);
         try f.appendSlice(arena, "\r\n");
-    }
 
-    // Search line pinned to the last row; no trailing newline so it never
-    // scrolls, leaving the cursor parked right after the query. The query is
-    // sanitized because Tab can copy a stored command into it.
-    try f.appendSlice(arena, sgr.fg_purple ++ star ++ sgr.reset ++ " ");
-    try f.appendSlice(arena, try sanitize(arena, query));
-}
+        var row: usize = 0;
+        while (row < fr.list_rows) : (row += 1) {
+            const idx = fr.base + (fr.list_rows - 1 - row);
+            if (idx < fr.shown.len) try appendEntry(arena, f, fr.shown[idx], fr.now, idx == fr.selected, fr.cols);
+            try f.appendSlice(arena, "\x1b[K\r\n");
+        }
+
+        // Search line pinned to the last row; no trailing newline so it never
+        // scrolls, leaving the cursor parked right after the query. The query is
+        // sanitized because Tab can copy a stored command into it.
+        try f.appendSlice(arena, sgr.fg_purple ++ star ++ sgr.reset ++ " ");
+        try f.appendSlice(arena, try sanitize(arena, fr.query));
+        try f.appendSlice(arena, "\x1b[J" ++ show_cursor);
+    }
+};
 
 /// Appends one list row: a fixed-width relative-time column then the command,
 /// syntax highlighted. The selected row spans the full width in the star's
@@ -777,8 +848,9 @@ test "frame pins the scope bar right-aligned on the top row" {
     defer arena.deinit();
 
     var f: std.ArrayList(u8) = .empty;
-    try frame(arena.allocator(), &f, "ls", &.{}, 0, 0, 1, 80, 0, .{ .text = "BAR", .cols = 10 });
-    try std.testing.expect(std.mem.startsWith(u8, f.items, "\x1b[H\x1b[2J\x1b[71GBAR\r\n"));
+    const fr: Frame = .{ .query = "ls", .shown = &.{}, .selected = 0, .base = 0, .list_rows = 1, .cols = 80, .now = 0, .bar = .{ .text = "BAR", .cols = 10 } };
+    try fr.build(arena.allocator(), &f);
+    try std.testing.expect(std.mem.startsWith(u8, f.items, hide_cursor ++ "\x1b[H\x1b[2K\x1b[71GBAR\r\n"));
 }
 
 test "frame drops the scope bar when the terminal is too narrow" {
@@ -786,8 +858,60 @@ test "frame drops the scope bar when the terminal is too narrow" {
     defer arena.deinit();
 
     var f: std.ArrayList(u8) = .empty;
-    try frame(arena.allocator(), &f, "", &.{}, 0, 0, 1, 8, 0, .{ .text = "BAR", .cols = 10 });
+    const fr: Frame = .{ .query = "", .shown = &.{}, .selected = 0, .base = 0, .list_rows = 1, .cols = 8, .now = 0, .bar = .{ .text = "BAR", .cols = 10 } };
+    try fr.build(arena.allocator(), &f);
     try std.testing.expect(std.mem.indexOf(u8, f.items, "BAR") == null);
+}
+
+test "a frame hides the cursor for the redraw and shows it again at the end" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var f: std.ArrayList(u8) = .empty;
+    const fr: Frame = .{ .query = "ls", .shown = &.{}, .selected = 0, .base = 0, .list_rows = 3, .cols = 40, .now = 0, .bar = null };
+    try fr.build(arena.allocator(), &f);
+    try std.testing.expect(std.mem.startsWith(u8, f.items, hide_cursor));
+    try std.testing.expect(std.mem.endsWith(u8, f.items, show_cursor));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, f.items, hide_cursor));
+}
+
+test "a frame clears each line instead of erasing the whole screen" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var f: std.ArrayList(u8) = .empty;
+    const rows = 4;
+    const fr: Frame = .{ .query = "", .shown = &.{}, .selected = 0, .base = 0, .list_rows = rows, .cols = 40, .now = 0, .bar = null };
+    try fr.build(arena.allocator(), &f);
+    try std.testing.expect(std.mem.indexOf(u8, f.items, "\x1b[2J") == null);
+    try std.testing.expectEqual(@as(usize, rows), std.mem.count(u8, f.items, "\x1b[K\r\n"));
+}
+
+test "an unchanged frame is not written to the terminal again" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    const entries = [_]Entry{.{ .command = "git status", .timestamp = 40 }};
+    const fr: Frame = .{ .query = "", .shown = &entries, .selected = 0, .base = 0, .list_rows = 3, .cols = 40, .now = 100, .bar = null };
+
+    var first: std.ArrayList(u8) = .empty;
+    try fr.build(a, &first);
+    var second: std.ArrayList(u8) = .empty;
+    try fr.build(a, &second);
+    try std.testing.expectEqualStrings(first.items, second.items);
+
+    var later: std.ArrayList(u8) = .empty;
+    var tick = fr;
+    tick.now = 101;
+    try tick.build(a, &later);
+    try std.testing.expectEqualStrings(first.items, later.items);
+
+    var moved: std.ArrayList(u8) = .empty;
+    var other = fr;
+    other.query = "g";
+    try other.build(a, &moved);
+    try std.testing.expect(!std.mem.eql(u8, first.items, moved.items));
 }
 
 test "selected row mutes the time column in lavender and tints the command" {
