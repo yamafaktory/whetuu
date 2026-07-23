@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>whetū thumbnail</title>
+<!--
+  Source for docs/thumb.png, the square mark used in listings.
+
+  It renders at 480x480 so it stays sharp on high density screens, twice the
+  240x240 that Product Hunt recommends. The emblem is the same U+F09A5 glyph the
+  prompt draws, from the same subset file the landing page uses, so the mark
+  cannot drift from the product. Regenerate with:
+
+    zig build og
+-->
+<style>
+@font-face {
+  font-family: "Whetu Glyphs";
+  src: url("../docs/glyphs.woff2") format("woff2");
+  font-display: block;
+  unicode-range: U+E0A0, U+E6A9, U+F051B, U+F09A5;
+}
+* { margin: 0; box-sizing: border-box; }
+body {
+  width: 480px;
+  height: 480px;
+  background: #0b0a11;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+/* Kept well inside the square so a rounded crop cannot clip a point off the
+   star, and large enough to read at listing size. */
+.mark {
+  font-family: "Whetu Glyphs", monospace;
+  font-size: 560px;
+  line-height: 1;
+  color: #a855f7;
+  /* The glyph ink sits low in its em box, so flex centring alone leaves the
+     star hanging. Same correction the page eyebrows carry. */
+  transform: translateY(-0.04em);
+}
+</style>
+</head>
+<body>
+  <span class="mark">&#xf09a5;</span>
+</body>
+</html>
