@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>whetū social card</title>
+<!--
+  Source for docs/og.png, the 1200x630 image link previews render.
+
+  It is HTML rather than an ImageMagick composition so it shares the landing
+  page's fonts, palette and star glyph exactly. A card drawn a second way
+  drifts from the page it represents. Regenerate with:
+
+    zig build og
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+@font-face {
+  font-family: "Whetu Glyphs";
+  src: url("../docs/glyphs.woff2") format("woff2");
+  font-display: block;
+  unicode-range: U+E0A0, U+E6A9, U+F051B, U+F09A5;
+}
+:root {
+  --ground: #0b0a11;
+  --panel: #16141f;
+  --panel-2: #1d1a29;
+  --ink: #ecebf4;
+  --muted: #8f88a6;
+  --accent: #a855f7;
+  --c-cmd: #4ade80;
+  --c-flag: #60a5fa;
+  --c-path: #e879f9;
+  --c-str: #fde047;
+  --mono: "Whetu Glyphs", "IBM Plex Mono", ui-monospace, monospace;
+  --sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  width: 1200px;
+  height: 630px;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  padding: 72px 76px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.wordmark {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 104px;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
+}
+.wordmark .mark { color: var(--accent); font-size: 0.92em; letter-spacing: 0; transform: translateY(-0.04em); }
+.lede {
+  font-size: 30px;
+  line-height: 1.35;
+  color: var(--ink);
+  margin-top: 26px;
+  max-width: 26ch;
+}
+.meta {
+  font-family: var(--mono);
+  font-size: 21px;
+  color: var(--muted);
+  margin-top: 18px;
+  letter-spacing: 0.01em;
+}
+.term {
+  margin-top: auto;
+  background: var(--panel);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.term-bar { background: var(--panel-2); padding: 11px 14px; display: flex; gap: 7px; align-items: center; }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: #2a2637; }
+.term-title { font-family: var(--mono); font-size: 14px; color: var(--muted); margin-left: 8px; letter-spacing: 0.06em; }
+.term-body {
+  font-family: var(--mono);
+  font-size: 19px;
+  line-height: 1.75;
+  padding: 16px 18px;
+  white-space: pre;
+}
+.p-dir { color: #22d3ee; font-weight: 700; }
+.p-sep { color: var(--muted); }
+.p-branch { color: var(--c-path); font-weight: 700; }
+.p-state, .p-status { color: var(--c-str); }
+.p-lang { color: #f7a41d; }
+.p-dur { color: var(--muted); }
+.p-star { color: var(--accent); font-weight: 700; }
+</style>
+</head>
+<body>
+  <h1 class="wordmark"><span class="mark">&#xf09a5;</span>whetū</h1>
+  <p class="lede">An opinionated, zero-config cross-shell prompt written in Zig.</p>
+  <p class="meta">one binary · no config · fish, bash, zsh · ~2 ms</p>
+
+  <div class="term">
+    <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="term-title">~/dev/whetuu</span></div>
+    <div class="term-body"><span class="p-dir">~/dev/whetuu</span> <span class="p-sep">·</span> <span class="p-branch">&#xe0a0; main</span> <span class="p-state">(rebasing 2/7)</span> <span class="p-status">[+2 !1 ?3 ⇡1]</span> <span class="p-sep">·</span> <span class="p-lang">&#xe6a9; v0.17.0</span> <span class="p-sep">·</span> <span class="p-dur">&#xf051b; 4s</span>
+<span class="p-star">&#xf09a5;</span> </div>
+  </div>
+</body>
+</html>

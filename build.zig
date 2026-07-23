@@ -71,6 +71,14 @@ pub fn build(b: *std.Build) void {
     demo.step.dependOn(b.getInstallStep());
     demo_step.dependOn(&demo.step);
 
+    // Renders the social card from tools/og.html. Not part of any other step:
+    // the card only changes when the wordmark or palette does.
+    const og_step = b.step("og", "Render docs/og.png, the social card");
+    const og = b.addSystemCommand(&.{"bash"});
+    og.addFileArg(b.path("tools/og.sh"));
+    og.stdio = .inherit;
+    og_step.dependOn(&og.step);
+
     // The version comes from `zig build publish -- v0.1.0` rather than
     // -Dversion, which stays reserved for stamping a local `release` build.
     const bump_step = b.step("bump", "Set the version in build.zig.zon (zig build bump -- vX.Y.Z)");

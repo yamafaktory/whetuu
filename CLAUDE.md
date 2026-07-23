@@ -138,6 +138,9 @@ by someone deciding whether to use whetuu, so it has to be plain.
 - `zig build run -- <args>` — compile and run (e.g. `-- prompt --shell fish --status 0`)
 - `zig build release` — cross-compile + package a tarball per target into
   `zig-out/release/`; `-Dversion=vX.Y.Z` stamps `whetuu --version`
+- `zig build og` — render `docs/og.png`, the social card, from `tools/og.html`.
+  Run it when the wordmark, palette or tagline changes, or the card starts
+  disagreeing with the page it previews
 - `zig build demo` — re-record `docs/demo.cast` and render the README's
   `docs/demo.gif` (see `RELEASING.md`); run it whenever the prompt or picker
   changes visibly
@@ -164,6 +167,9 @@ workflows call `zig build release`, so it is the only place a target is named.
   through a pipe.
 - `glyphs.woff2` — four Nerd Font glyphs the page renders, subsetted out of
   Meslo LG S Nerd Font Mono. Add a glyph to the page and this needs rebuilding.
+- `og.png` — the social card link previews render. Built from `tools/og.html`
+  by `zig build og`, which is HTML so the card shares the page's fonts and
+  palette instead of approximating them.
 - `.nojekyll` — stops Pages running the files through Jekyll.
 
 Test `install.sh` by serving the directory and piping it, which is the only
