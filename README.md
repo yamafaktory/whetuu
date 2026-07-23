@@ -9,9 +9,10 @@ An opinionated, zero-config cross-shell prompt written in Zig.
 *whetū* is Māori for "star". A star is the default prompt character, using the
 Nerd Font glyph `nf-md-star_face`. The binary is installed as `whetuu`.
 
-Pronounced **FEH-too** (`/ˈfɛ.tuː/`). Stress the first syllable. In Māori `wh`
-is an *f* sound, not a *w*. The macron in `ū` makes that vowel long, which is
-why the ASCII spelling doubles it.
+Pronounced **feh-TOO** (`/fɛˈtuː/`). In Māori `wh` is an *f* sound, not a *w*.
+The macron in `ū` makes that vowel long, and a long vowel takes the stress, so
+it falls on the second syllable. The ASCII name doubles the `u` to write that
+same long vowel.
 
 There is nothing to configure. One compiled binary renders one curated prompt,
 the same for everyone. Every module that reads the disk runs at the same time
