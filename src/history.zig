@@ -110,8 +110,16 @@ test "a leading space keeps a command out of the store" {
 /// timestamp). The same command run in two directories stays two entries, so
 /// each directory keeps its own recency.
 fn dedupe(arena: Allocator, bytes: []const u8) ![]const Entry {
+    // One line is at most one entry, so counting them sizes both containers
+    // exactly once. Letting them grow instead costs more than half the time
+    // spent here, in rehashing and in arena copies that can never grow in
+    // place — the keys allocated between them keep the list from being last.
+    const lines = std.mem.count(u8, bytes, "\n") + 1;
+
     var seen: std.StringHashMap(void) = .init(arena);
+    try seen.ensureTotalCapacity(std.math.lossyCast(u32, lines));
     var out: std.ArrayList(Entry) = .empty;
+    try out.ensureTotalCapacity(arena, lines);
 
     var it = std.mem.splitBackwardsScalar(u8, bytes, '\n');
     while (it.next()) |line| {
@@ -119,8 +127,8 @@ fn dedupe(arena: Allocator, bytes: []const u8) ![]const Entry {
         const entry = try parse(arena, line);
         const key = try std.fmt.allocPrint(arena, "{s}\x00{s}", .{ entry.cwd, entry.command });
         if (seen.contains(key)) continue;
-        try seen.put(key, {});
-        try out.append(arena, entry);
+        seen.putAssumeCapacity(key, {});
+        out.appendAssumeCapacity(entry);
     }
 
     return out.toOwnedSlice(arena);
