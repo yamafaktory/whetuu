@@ -90,6 +90,16 @@ Adding a target is a one-line edit there; CI cross-compiles the whole list on
 every push, which is what catches a platform-specific regression (a
 `std.os.linux` call, say) before it reaches a release.
 
+## The site
+
+`docs/` is served by GitHub Pages from `main`, so the site redeploys on every
+push. There is no release step for it. That also means `docs/install.sh` goes
+live the moment it is pushed, while the binary it downloads is whichever release
+is currently latest.
+
+So cut the release before pushing a change to the installer or to the install
+instructions, or the site will describe a binary nobody can get yet.
+
 ## Regenerating the demo
 
 `docs/demo.gif` in the README is rendered from `docs/demo.cast`. Whenever the
