@@ -23,6 +23,10 @@ pub const Entry = struct {
     command: []const u8,
     cwd: []const u8 = "",
     timestamp: i64,
+    /// A display-only marker for the ephemeral command that just failed, which
+    /// the picker shows at the top and marks but never stores. The read path
+    /// never sets it, so a loaded entry is always false.
+    failed: bool = false,
 };
 
 /// Appends `command` (run in directory `cwd` at unix time `now`) to the

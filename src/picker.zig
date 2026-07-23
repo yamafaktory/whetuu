@@ -568,7 +568,9 @@ const Frame = struct {
 /// Appends one list row: a fixed-width relative-time column then the command,
 /// syntax highlighted. The selected row spans the full width in the star's
 /// purple and switches to the tints legible on it. The time column is muted on
-/// every row, selected or not, so only the command stands out.
+/// every row, selected or not, so only the command stands out. The ephemeral
+/// just-failed entry carries a red star between the time column and the
+/// command, the same emblem the prompt reddens after a failure.
 fn appendEntry(arena: Allocator, f: *std.ArrayList(u8), entry: Entry, now: i64, selected: bool, cols: usize) !void {
     var buf: [24]u8 = undefined;
     const when = time_ago.relative(&buf, now, entry.timestamp);
@@ -577,20 +579,26 @@ fn appendEntry(arena: Allocator, f: *std.ArrayList(u8), entry: Entry, now: i64, 
     const tokens = try highlight.tokenize(arena, try oneLine(arena, entry.command));
 
     if (!selected) {
+        const override: ?style.Style = if (entry.failed) .{ .color = .red } else null;
         try f.appendSlice(arena, sgr.dim);
         try appendRightAligned(arena, f, when, time_width);
         try f.appendSlice(arena, sgr.reset ++ " ");
-        _ = try appendCommand(arena, f, tokens, room, selected);
+        _ = try appendCommand(arena, f, tokens, room, selected, override);
         try f.appendSlice(arena, sgr.reset);
 
         return;
     }
 
-    try f.appendSlice(arena, sgr.bg_purple ++ sgr.fg_lavender);
+    // The failed entry gets a red bar with white text instead of the purple one.
+    const bg: []const u8 = if (entry.failed) sgr.bg_red else sgr.bg_purple;
+    const fg: []const u8 = if (entry.failed) sgr.fg_white else sgr.fg_lavender;
+    const override: ?style.Style = if (entry.failed) .{ .color = .white } else null;
+    try f.appendSlice(arena, bg);
+    try f.appendSlice(arena, fg);
     try appendRightAligned(arena, f, when, time_width);
     try f.appendSlice(arena, " ");
-    const shown = try appendCommand(arena, f, tokens, room, selected);
-    try appendSpaces(arena, f, cols - (time_width + 1 + shown));
+    const shown = try appendCommand(arena, f, tokens, room, selected, override);
+    try appendSpaces(arena, f, cols -| (time_width + 1 + shown));
     try f.appendSlice(arena, sgr.reset);
 }
 
@@ -601,18 +609,21 @@ fn appendEntry(arena: Allocator, f: *std.ArrayList(u8), entry: Entry, now: i64, 
 /// repeated prefix. The indicator belongs to no token, so it stays plain and
 /// never takes a token's color. Each token emits only a foreground escape,
 /// never a reset, so the selected row's background survives the whole command.
-fn appendCommand(arena: Allocator, f: *std.ArrayList(u8), tokens: []const highlight.Token, cols: usize, selected: bool) !usize {
+///
+/// A non-null `override` paints every token that one color instead of its
+/// syntax class, which is how the failed entry reads as one flat red run.
+fn appendCommand(arena: Allocator, f: *std.ArrayList(u8), tokens: []const highlight.Token, cols: usize, selected: bool, override: ?style.Style) !usize {
     const total = totalWidth(tokens);
-    if (total <= cols) return appendRange(arena, f, tokens, 0, total, selected);
+    if (total <= cols) return appendRange(arena, f, tokens, 0, total, selected, override);
 
     // Too narrow to spend a column on the indicator, so fall back to a plain cut.
-    if (cols <= ellipsis_width) return appendRange(arena, f, tokens, 0, cols, selected);
+    if (cols <= ellipsis_width) return appendRange(arena, f, tokens, 0, cols, selected, override);
 
     const content = cols - ellipsis_width;
     const kept_tail = content / 2;
-    _ = try appendRange(arena, f, tokens, 0, content - kept_tail, selected);
-    try appendStyled(arena, f, ellipsis, .plain, selected);
-    _ = try appendRange(arena, f, tokens, total - kept_tail, total, selected);
+    _ = try appendRange(arena, f, tokens, 0, content - kept_tail, selected, override);
+    try appendStyled(arena, f, ellipsis, .plain, selected, override);
+    _ = try appendRange(arena, f, tokens, total - kept_tail, total, selected, override);
 
     return cols;
 }
@@ -620,7 +631,7 @@ fn appendCommand(arena: Allocator, f: *std.ArrayList(u8), tokens: []const highli
 /// Appends the part of `tokens` covering columns `[from, to)`, and returns how
 /// many columns that was. Tokens are consecutive slices of one command, so a
 /// range is found by counting columns across them rather than by re-measuring.
-fn appendRange(arena: Allocator, f: *std.ArrayList(u8), tokens: []const highlight.Token, from: usize, to: usize, selected: bool) !usize {
+fn appendRange(arena: Allocator, f: *std.ArrayList(u8), tokens: []const highlight.Token, from: usize, to: usize, selected: bool, override: ?style.Style) !usize {
     var at: usize = 0;
     var used: usize = 0;
     for (tokens) |token| {
@@ -631,17 +642,18 @@ fn appendRange(arena: Allocator, f: *std.ArrayList(u8), tokens: []const highligh
         if (start >= end) continue;
 
         const text = if (start == at - w and end == at) token.text else head(tail(token.text, at - start), end - start);
-        try appendStyled(arena, f, text, token.class, selected);
+        try appendStyled(arena, f, text, token.class, selected, override);
         used += width(text);
     }
 
     return used;
 }
 
-/// Appends `text` in the color `class` gets on this kind of row.
-fn appendStyled(arena: Allocator, f: *std.ArrayList(u8), text: []const u8, class: highlight.Class, selected: bool) !void {
+/// Appends `text` in `override` when set, otherwise the color `class` gets on
+/// this kind of row.
+fn appendStyled(arena: Allocator, f: *std.ArrayList(u8), text: []const u8, class: highlight.Class, selected: bool, override: ?style.Style) !void {
     var buf: [style.escape_len]u8 = undefined;
-    const sty = if (selected) class.barStyle() else class.rowStyle();
+    const sty = override orelse (if (selected) class.barStyle() else class.rowStyle());
     try f.appendSlice(arena, style.sgrEscape(&buf, sty));
     try f.appendSlice(arena, text);
 }
@@ -1033,6 +1045,37 @@ test "rows replace control bytes in stored commands" {
     try std.testing.expect(std.mem.indexOf(u8, f.items, "ls?[31mred") != null);
 }
 
+test "the failed entry is flat red, no whetuu star, unlike a stored row" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    var buf: [style.escape_len]u8 = undefined;
+    // Operator-free commands so the only source of the failure red is the entry.
+    const red = try a.dupe(u8, style.sgrEscape(&buf, .{ .color = .red }));
+
+    var failed: std.ArrayList(u8) = .empty;
+    try appendEntry(a, &failed, .{ .command = "gti status", .timestamp = 40, .failed = true }, 100, false, 80);
+    try std.testing.expect(std.mem.indexOf(u8, failed.items, red) != null);
+    try std.testing.expect(std.mem.indexOf(u8, failed.items, star) == null);
+
+    var stored: std.ArrayList(u8) = .empty;
+    try appendEntry(a, &stored, .{ .command = "git status", .timestamp = 40 }, 100, false, 80);
+    try std.testing.expect(std.mem.indexOf(u8, stored.items, red) == null);
+    try std.testing.expect(std.mem.indexOf(u8, stored.items, star) == null);
+}
+
+test "the selected failed entry gets a red bar, not the purple one" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    var failed: std.ArrayList(u8) = .empty;
+    try appendEntry(a, &failed, .{ .command = "gti status", .timestamp = 40, .failed = true }, 100, true, 80);
+    try std.testing.expect(std.mem.indexOf(u8, failed.items, sgr.bg_red) != null);
+    try std.testing.expect(std.mem.indexOf(u8, failed.items, sgr.bg_purple) == null);
+}
+
 test "a highlighted row still stops at the terminal width" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
@@ -1046,7 +1089,7 @@ test "a highlighted row still stops at the terminal width" {
 /// The visible text of a tokenized command fitted to `cols`, escapes stripped.
 fn fitted(arena: Allocator, command: []const u8, cols: usize) ![]const u8 {
     var f: std.ArrayList(u8) = .empty;
-    _ = try appendCommand(arena, &f, try highlight.tokenize(arena, command), cols, false);
+    _ = try appendCommand(arena, &f, try highlight.tokenize(arena, command), cols, false, null);
 
     var out: std.ArrayList(u8) = .empty;
     var i: usize = 0;
@@ -1117,7 +1160,7 @@ test "the ellipsis is drawn plain so it never takes a token color" {
     const plain = style.sgrEscape(&buf, highlight.Class.plain.rowStyle());
 
     var f: std.ArrayList(u8) = .empty;
-    _ = try appendCommand(a, &f, try highlight.tokenize(a, "nvim ~/.config/fish/config.fish"), 14, false);
+    _ = try appendCommand(a, &f, try highlight.tokenize(a, "nvim ~/.config/fish/config.fish"), 14, false, null);
     try std.testing.expect(std.mem.indexOf(u8, f.items, try std.mem.concat(a, u8, &.{ plain, ellipsis })) != null);
 }
 

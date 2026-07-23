@@ -13,6 +13,16 @@ pub const HistoryAddArgs = struct {
     words: []const [:0]const u8 = &.{},
 };
 
+/// Values parsed from the picker form of `whetuu history`: the query seeded
+/// from the shell's command line, the command that just failed (shown unstored
+/// at the top of the list), and the unix time it failed at so its age counts up
+/// from when it ran rather than from when the picker opened.
+pub const HistoryPickArgs = struct {
+    query: []const u8 = "",
+    last: []const u8 = "",
+    last_at: i64 = 0,
+};
+
 /// Values parsed from `whetuu prompt` flags. Fields default to a usable prompt
 /// even when a shell omits a flag.
 pub const PromptArgs = struct {
@@ -55,6 +65,37 @@ pub fn parseHistoryAdd(args: []const [:0]const u8) ParseError!HistoryAddArgs {
 
         i += 1;
         result.exit_status = parseClamped(u8, args[i]) catch return error.InvalidNumber;
+    }
+
+    return result;
+}
+
+/// Parses `[--query <text>] [--last <command>] [--last-at <unix>]` for the
+/// history picker, in any order. Every flag takes a value, so a trailing flag
+/// without one is an error; an unrecognized flag is rejected so a typo in an
+/// init script surfaces rather than being silently opened as an empty picker.
+pub fn parseHistoryPick(args: []const [:0]const u8) ParseError!HistoryPickArgs {
+    var result: HistoryPickArgs = .{};
+
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const flag = args[i];
+        if (i + 1 >= args.len) return error.MissingValue;
+
+        i += 1;
+        const value = args[i];
+
+        if (std.mem.eql(u8, flag, "--query")) {
+            result.query = value;
+        } else if (std.mem.eql(u8, flag, "--last")) {
+            result.last = value;
+        } else if (std.mem.eql(u8, flag, "--last-at")) {
+            // Lenient: an unset shell variable arrives empty, and a bad clock is
+            // not worth failing the whole picker over — either just means "now".
+            result.last_at = std.fmt.parseInt(i64, value, 10) catch 0;
+        } else {
+            return error.UnknownFlag;
+        }
     }
 
     return result;
@@ -148,4 +189,32 @@ test "history add defaults to success and -- is optional" {
 test "history add rejects a missing status value" {
     const args = [_][:0]const u8{"--status"};
     try std.testing.expectError(error.MissingValue, parseHistoryAdd(&args));
+}
+
+test "history pick reads query, last, and last-at in any order" {
+    const args = [_][:0]const u8{ "--last", "gti status", "--query", "gt", "--last-at", "1700000000" };
+    const got = try parseHistoryPick(&args);
+    try std.testing.expectEqualStrings("gt", got.query);
+    try std.testing.expectEqualStrings("gti status", got.last);
+    try std.testing.expectEqual(@as(i64, 1_700_000_000), got.last_at);
+}
+
+test "history pick defaults to empty, and a blank last-at is zero" {
+    const got = try parseHistoryPick(&.{});
+    try std.testing.expectEqualStrings("", got.query);
+    try std.testing.expectEqualStrings("", got.last);
+    try std.testing.expectEqual(@as(i64, 0), got.last_at);
+
+    const blank = [_][:0]const u8{ "--last-at", "" };
+    try std.testing.expectEqual(@as(i64, 0), (try parseHistoryPick(&blank)).last_at);
+}
+
+test "history pick rejects a flag without a value" {
+    const args = [_][:0]const u8{"--last"};
+    try std.testing.expectError(error.MissingValue, parseHistoryPick(&args));
+}
+
+test "history pick rejects an unknown flag" {
+    const args = [_][:0]const u8{ "--nope", "x" };
+    try std.testing.expectError(error.UnknownFlag, parseHistoryPick(&args));
 }

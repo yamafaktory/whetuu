@@ -96,10 +96,12 @@ pub const lavender_sgr = std.fmt.comptimePrint("{d};{d};{d}", .{ lavender.r, lav
 /// go through `write` instead.
 pub const sgr = struct {
     pub const bg_purple = "\x1b[48;2;" ++ purple_sgr ++ "m";
+    pub const bg_red = "\x1b[41m";
     pub const bold = "\x1b[1m";
     pub const dim = "\x1b[90m";
     pub const fg_lavender = "\x1b[38;2;" ++ lavender_sgr ++ "m";
     pub const fg_purple = "\x1b[38;2;" ++ purple_sgr ++ "m";
+    pub const fg_white = "\x1b[37m";
     pub const reset = "\x1b[0m";
 };
 
