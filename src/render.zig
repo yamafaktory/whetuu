@@ -28,21 +28,20 @@ const separator: Span = .{ .style = .{ .color = .bright_black }, .text = " · " 
 /// tints the prompt character, which is pure and rendered synchronously after
 /// the segment line.
 pub fn render(io: Io, arena: Allocator, env: *const Env, w: *Writer) Writer.Error!void {
-    var directory_future = io.async(directory.run, .{ io, arena, env });
     var git_future = io.async(git.run, .{ io, arena, env });
     var language_future = io.async(language.run, .{ io, arena, env });
-    var duration_future = io.async(cmd_duration.run, .{ io, arena, env });
 
-    // user@host does no I/O beyond a hostname syscall, so it is rendered
-    // synchronously while the async modules work.
+    // Only git and language touch the filesystem, so only they are worth a
+    // task. The rest are pure and run inline while those two overlap —
+    // spawning them costs far more than the work they do.
     var wrote_any = false;
     try writeSegment(w, env.shell, user_host.run(arena, env), &wrote_any);
-    try writeSegment(w, env.shell, directory_future.await(io), &wrote_any);
+    try writeSegment(w, env.shell, directory.run(io, arena, env), &wrote_any);
     try writeSegment(w, env.shell, git_future.await(io), &wrote_any);
 
     const lang_result = language_future.await(io);
     try writeSegment(w, env.shell, lang_result.spans, &wrote_any);
-    try writeSegment(w, env.shell, duration_future.await(io), &wrote_any);
+    try writeSegment(w, env.shell, cmd_duration.run(io, arena, env), &wrote_any);
 
     // The character always appears, on its own line, with a trailing space so
     // the cursor sits one column clear of the symbol.
