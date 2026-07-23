@@ -96,11 +96,12 @@ pub const Options = struct {
 ///
 /// Three arenas keep an idle picker from growing or from touching the terminal
 /// for no reason. The frame buffer comes from a scratch arena reset every
-/// iteration. The filtered list comes from its own arena, reset only when the
-/// query or the scope actually moves, so a tick costs no filtering at all. The
-/// last frame written is kept on `arena` and compared against the next one, so
-/// a redraw that would change nothing is never sent. The terminal is always
-/// restored on exit.
+/// iteration. Scope selection and query matching each get their own arena and
+/// rerun only when their own input moves, so a tick filters nothing and a
+/// keystroke never re-hashes the whole store to dedupe it again. The last frame
+/// written is kept on `arena` and compared against the next one, so a redraw
+/// that would change nothing is never sent. The terminal is always restored on
+/// exit.
 pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]const u8 {
     if (items.len == 0) return null;
 
@@ -116,6 +117,7 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
     defer writeAll(io, tty, "\x1b[?1049l" ++ show_cursor);
 
     var frame_arena: std.heap.ArenaAllocator = .init(arena);
+    var scope_arena: std.heap.ArenaAllocator = .init(arena);
     var list_arena: std.heap.ArenaAllocator = .init(arena);
     var drawn: std.ArrayList(u8) = .empty;
     var query: std.ArrayList(u8) = .empty;
@@ -124,7 +126,9 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
     var selected: usize = 0;
     var base: usize = 0;
     var input: Input = .{};
+    var in_scope: []const Entry = &.{};
     var shown: []const Entry = &.{};
+    var rescope = true;
     var refilter = true;
 
     while (true) {
@@ -133,9 +137,14 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
         const now = Io.Clock.now(.real, io).toSeconds();
         const term = size(io, tty);
 
+        if (rescope) {
+            _ = scope_arena.reset(.retain_capacity);
+            in_scope = scoped(scope_arena.allocator(), items, scope, opts.cwd) catch items;
+            rescope = false;
+        }
         if (refilter) {
             _ = list_arena.reset(.retain_capacity);
-            shown = filter(list_arena.allocator(), items, query.items, scope, opts.cwd) catch items;
+            shown = matching(list_arena.allocator(), in_scope, query.items) catch in_scope;
             refilter = false;
         }
         if (selected >= shown.len) selected = if (shown.len == 0) 0 else shown.len - 1;
@@ -186,6 +195,7 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
 
                 scope = if (scope == .dir) .all else .dir;
                 selected = 0;
+                rescope = true;
                 refilter = true;
             },
             .cancel => return null,
@@ -207,12 +217,15 @@ fn initialScope(items: []const Entry, cwd: []const u8) Scope {
     return .all;
 }
 
-/// Returns the subset of `items` in `scope` matching `query`, order preserved.
-/// Each whitespace-separated token in the query must appear (case-insensitive)
-/// in the command, so `git pu` narrows to commands containing both. The `.dir`
-/// scope keeps only entries recorded in `cwd`; the `.all` scope collapses the
-/// same command run in several directories to its newest occurrence.
-fn filter(arena: Allocator, items: []const Entry, query: []const u8, scope: Scope, cwd: []const u8) ![]const Entry {
+/// Returns the entries `scope` admits, order preserved. The `.dir` scope keeps
+/// only entries recorded in `cwd`; the `.all` scope collapses the same command
+/// run in several directories to its newest occurrence.
+///
+/// No query is involved, which is the point: hashing every command to dedupe it
+/// costs several times what matching a query does, and the result cannot change
+/// between keystrokes. The picker runs this once per scope and narrows the
+/// result with `matching`.
+fn scoped(arena: Allocator, items: []const Entry, scope: Scope, cwd: []const u8) ![]const Entry {
     var seen: std.StringHashMap(void) = .init(arena);
     var out: std.ArrayList(Entry) = .empty;
     for (items) |item| {
@@ -224,6 +237,18 @@ fn filter(arena: Allocator, items: []const Entry, query: []const u8, scope: Scop
             },
         }
 
+        try out.append(arena, item);
+    }
+
+    return out.toOwnedSlice(arena);
+}
+
+/// Returns the entries of `items` matching `query`, order preserved. Each
+/// whitespace-separated token in the query must appear (case-insensitive) in
+/// the command, so `git pu` narrows to commands containing both.
+fn matching(arena: Allocator, items: []const Entry, query: []const u8) ![]const Entry {
+    var out: std.ArrayList(Entry) = .empty;
+    for (items) |item| {
         if (matches(item.command, query)) try out.append(arena, item);
     }
 
@@ -772,7 +797,8 @@ test "filter narrows to matching entries, order preserved" {
         .{ .command = "cargo test", .timestamp = 2 },
         .{ .command = "git pull", .timestamp = 1 },
     };
-    const got = try filter(arena.allocator(), &items, "git", .all, "");
+    const a = arena.allocator();
+    const got = try matching(a, try scoped(a, &items, .all, ""), "git");
     try std.testing.expectEqual(@as(usize, 2), got.len);
     try std.testing.expectEqualStrings("git push", got[0].command);
     try std.testing.expectEqualStrings("git pull", got[1].command);
@@ -787,7 +813,8 @@ test "dir scope keeps only the current directory's entries" {
         .{ .command = "zig build", .cwd = "/b", .timestamp = 2 },
         .{ .command = "ls", .cwd = "/a", .timestamp = 1 },
     };
-    const got = try filter(arena.allocator(), &items, "", .dir, "/a");
+    const a = arena.allocator();
+    const got = try matching(a, try scoped(a, &items, .dir, "/a"), "");
     try std.testing.expectEqual(@as(usize, 2), got.len);
     try std.testing.expectEqualStrings("zig build", got[0].command);
     try std.testing.expectEqualStrings("ls", got[1].command);
@@ -801,7 +828,8 @@ test "all scope collapses a command run in several directories to its newest" {
         .{ .command = "zig build", .cwd = "/a", .timestamp = 3 },
         .{ .command = "zig build", .cwd = "/b", .timestamp = 2 },
     };
-    const got = try filter(arena.allocator(), &items, "", .all, "");
+    const a = arena.allocator();
+    const got = try matching(a, try scoped(a, &items, .all, ""), "");
     try std.testing.expectEqual(@as(usize, 1), got.len);
     try std.testing.expectEqualStrings("/a", got[0].cwd);
 }
