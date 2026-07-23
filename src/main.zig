@@ -1,7 +1,8 @@
-//! whetuu entry point. Three subcommands:
+//! whetuu entry point. Four subcommands:
 //!   whetuu init <fish|bash|zsh>   — print the shell integration script
 //!   whetuu prompt [flags]         — render the prompt (called by the shell)
 //!   whetuu history [add ...]      — open the history picker, or record a command
+//!   whetuu paths                  — print where the history and cache live
 //! plus `whetuu --version`.
 
 const std = @import("std");
@@ -17,6 +18,7 @@ const init_scripts = @import("init_scripts.zig");
 const picker = @import("picker.zig");
 const render = @import("render.zig");
 const style = @import("style.zig");
+const version_cache = @import("version_cache.zig");
 
 /// Upper bound on a current-directory path. Beyond this the directory is simply
 /// reported empty rather than overrunning the buffer.
@@ -47,7 +49,51 @@ pub fn main(init: std.process.Init) !void {
         return runHistory(io, arena, init.environ_map, args[2..]);
     }
 
+    if (std.mem.eql(u8, sub, "paths")) {
+        return runPaths(io, arena, init.environ_map);
+    }
+
     return usage(io);
+}
+
+/// Prints where whetuu keeps its two files, and whether each exists yet.
+/// Both follow the XDG base directory spec, so neither is under the directory
+/// the installer put the binary in: removing whetuu should not remove the
+/// history you built up with it.
+fn runPaths(io: Io, arena: Allocator, environ: *std.process.Environ.Map) !void {
+    const home = environ.get("HOME") orelse "";
+    const store = try history.storePath(arena, environ.get("XDG_DATA_HOME") orelse "", home);
+    const cache = try version_cache.path(arena, environ.get("XDG_CACHE_HOME") orelse "", home);
+
+    var buf: [1024]u8 = undefined;
+    var fw = Io.File.stdout().writer(io, &buf);
+    const w = &fw.interface;
+
+    try w.writeAll(style.sgr.fg_purple ++ style.icon.star ++ style.sgr.reset ++ " " ++
+        style.sgr.dim ++ "whetuu keeps two files, both outside the install directory" ++
+        style.sgr.reset ++ "\n\n");
+    try writePath(io, w, "history", store);
+    try writePath(io, w, "cache", cache);
+    try w.flush();
+}
+
+/// One `<label>  <path>  <state>` row. A null path means neither `$HOME` nor
+/// the matching XDG variable was set, so whetuu has nowhere to write.
+fn writePath(io: Io, w: *std.Io.Writer, label: []const u8, path: ?[]const u8) !void {
+    const dim = style.sgr.dim;
+    const reset = style.sgr.reset;
+
+    try w.print("  " ++ dim ++ "{s: <8}" ++ reset, .{label});
+    const p = path orelse {
+        try w.writeAll(dim ++ "unset, no HOME or XDG variable" ++ reset ++ "\n");
+        return;
+    };
+
+    try w.writeAll(p);
+    if (Io.Dir.accessAbsolute(io, p, .{})) |_| {} else |_| {
+        try w.writeAll("  " ++ dim ++ "(not created yet)" ++ reset);
+    }
+    try w.writeByte('\n');
 }
 
 /// Builds the `Env` from flags and environment, then renders to stdout.
@@ -138,6 +184,7 @@ fn usage(io: Io) !void {
         "  " ++ purple ++ "prompt" ++ reset ++ "                 " ++ dim ++ "Render the prompt (called by the shell)" ++ reset ++ "\n" ++
         "  " ++ purple ++ "history" ++ reset ++ "                " ++ dim ++ "Open the interactive history picker" ++ reset ++ "\n" ++
         "  " ++ purple ++ "history add" ++ reset ++ "            " ++ dim ++ "Record a finished command (status 0 only)" ++ reset ++ "\n" ++
+        "  " ++ purple ++ "paths" ++ reset ++ "                  " ++ dim ++ "Print where the history and cache live" ++ reset ++ "\n" ++
         "  " ++ purple ++ "--version" ++ reset ++ "              " ++ dim ++ "Print the version" ++ reset ++ "\n";
 
     var buf: [256]u8 = undefined;
@@ -173,4 +220,25 @@ test {
     _ = @import("style.zig");
     _ = @import("time_ago.zig");
     _ = @import("version_cache.zig");
+}
+
+test "paths reports both files, and says so when there is nowhere to write" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // XDG wins over HOME, and both land under a whetuu directory of their own
+    // rather than under the directory the installer used.
+    try std.testing.expectEqualStrings("/xd/whetuu/history", (try history.storePath(a, "/xd", "/h")).?);
+    try std.testing.expectEqualStrings("/xc/whetuu/versions", (try version_cache.path(a, "/xc", "/h")).?);
+    try std.testing.expectEqualStrings("/h/.local/share/whetuu/history", (try history.storePath(a, "", "/h")).?);
+    try std.testing.expectEqualStrings("/h/.cache/whetuu/versions", (try version_cache.path(a, "", "/h")).?);
+
+    // Neither path is derived from the install directory, so uninstalling by
+    // removing ~/.whetuu cannot take the history with it.
+    try std.testing.expect(std.mem.indexOf(u8, (try history.storePath(a, "", "/h")).?, ".whetuu/") == null);
+    try std.testing.expect(std.mem.indexOf(u8, (try version_cache.path(a, "", "/h")).?, ".whetuu/") == null);
+
+    try std.testing.expect((try history.storePath(a, "", "")) == null);
+    try std.testing.expect((try version_cache.path(a, "", "")) == null);
 }
