@@ -99,6 +99,9 @@ with personal habit, Zig wins.
    output format, shell integration, storage paths) must be reflected there in
    the same change; also fix any statement the change has made stale. Only
    purely internal refactors leave the README untouched.
+4. Build for local testing: `zig build --release=fast`. This installs an
+   optimized `zig-out/bin/whetuu`, which is what I try the change with in a real
+   shell. Do this on every change, not just user-visible ones.
 
 `README.md` is for users. It covers installing, shell setup, the commands, and
 the history picker. Release and maintenance workflow lives in `RELEASING.md`.
@@ -125,6 +128,8 @@ by someone deciding whether to use whetuu, so it has to be plain.
 ## Build steps
 
 - `zig build` — compile
+- `zig build --release=fast` — optimized build installed to `zig-out/bin/whetuu`,
+  for trying a change locally. Run after every change (see above)
 - `zig build check` — type-check without producing an artifact
 - `zig build run -- <args>` — compile and run (e.g. `-- prompt --shell fish --status 0`)
 - `zig build release` — cross-compile + package a tarball per target into

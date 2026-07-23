@@ -97,12 +97,34 @@ pub const lavender_sgr = std.fmt.comptimePrint("{d};{d};{d}", .{ lavender.r, lav
 pub const sgr = struct {
     pub const bg_purple = "\x1b[48;2;" ++ purple_sgr ++ "m";
     pub const bold = "\x1b[1m";
-    pub const bright_white = "\x1b[97m";
     pub const dim = "\x1b[90m";
     pub const fg_lavender = "\x1b[38;2;" ++ lavender_sgr ++ "m";
     pub const fg_purple = "\x1b[38;2;" ++ purple_sgr ++ "m";
     pub const reset = "\x1b[0m";
 };
+
+/// Longest escape `sgrEscape` can produce: `\x1b[` plus bold plus a truecolor
+/// foreground plus `m`.
+pub const escape_len = "\x1b[1;38;2;255;255;255m".len;
+
+/// The bare SGR escape for `sty`, written into `buf` and returned as a slice of
+/// it. Unwrapped and never a reset, so consecutive calls recolor text without
+/// disturbing a background already in effect — that is what lets the picker
+/// paint a highlighted row. Prompt segments must go through `write` instead,
+/// which adds the shell's width markers. Every branch fits `escape_len` by
+/// construction, so the writes assert rather than fail.
+pub fn sgrEscape(buf: *[escape_len]u8, sty: Style) []const u8 {
+    var w: Writer = .fixed(buf);
+    w.writeAll("\x1b[") catch unreachable;
+    if (sty.bold) w.writeAll("1;") catch unreachable;
+    if (sty.rgb) |c| {
+        w.print("38;2;{d};{d};{d}m", .{ c.r, c.g, c.b }) catch unreachable;
+    } else {
+        w.print("{d}m", .{sty.color.code()}) catch unreachable;
+    }
+
+    return w.buffered();
+}
 
 /// Writes `text` styled per `style`, with all escape sequences wrapped so the
 /// target shell does not count them toward the prompt width. A `.default`,
@@ -113,14 +135,9 @@ pub fn write(w: *Writer, shell: Shell, style: Style, text: []const u8) Writer.Er
         return;
     }
 
+    var buf: [escape_len]u8 = undefined;
     try wrapStart(w, shell);
-    try w.writeAll("\x1b[");
-    if (style.bold) try w.writeAll("1;");
-    if (style.rgb) |c| {
-        try w.print("38;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-    } else {
-        try w.print("{d}m", .{style.color.code()});
-    }
+    try w.writeAll(sgrEscape(&buf, style));
     try wrapEnd(w, shell);
 
     try writeSanitized(w, text);

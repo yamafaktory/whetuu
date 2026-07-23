@@ -268,6 +268,26 @@ the search line and older ones climb from there. Each row is prefixed with how
 long ago it ran, like `5m`, `2h` or `3d`. The selected row is highlighted across
 the full width in the prompt's star purple.
 
+Commands are syntax highlighted. The program name, flags, paths, variables,
+quoted strings and operators each get their own color, so a long row reads at a
+glance. The colors come from your terminal theme rather than from whetuu, so the
+picker matches the palette you already run. The selected row switches to lighter
+tints of the same colors, which stay readable on the purple.
+
+Paths are recognized by how they are written, like `/tmp/out`, `./build` or
+`~/dev`. A bare `src` stays plain. whetuu never touches the filesystem to render
+a row, so it cannot know that one is a directory.
+
+A command wider than the terminal loses its middle to a `…` rather than its end.
+Both the program name and the tail stay on screen. That is what keeps a run of
+commands sharing one long prefix apart, like several `cd <long path> && git …`
+entries that differ only in the part a plain cut would drop.
+
+Rows are drawn on one line. Runs of spaces, tabs and newlines each collapse to a
+single space, so a command written across several lines stays readable in the
+list. This changes the row only. Enter and Tab both give you back the command
+exactly as it was recorded.
+
 The picker draws on `/dev/tty`, so nothing but the chosen command reaches
 stdout. Duplicates are collapsed per directory, so the same command run in two
 projects keeps its own recency in each.

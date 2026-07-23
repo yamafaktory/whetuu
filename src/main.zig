@@ -159,6 +159,7 @@ fn writeVersion(io: Io) !void {
 test {
     _ = @import("Env.zig");
     _ = @import("cli.zig");
+    _ = @import("highlight.zig");
     _ = @import("history.zig");
     _ = @import("init_scripts.zig");
     _ = @import("picker.zig");

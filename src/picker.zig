@@ -6,9 +6,10 @@
 //! older commands climb upward. It opens scoped to the current directory's
 //! history (falling back to all history when the directory has none) and
 //! Ctrl+G toggles the scope; a bar at the top of the screen names both scopes
-//! with the active one highlighted (`~/dev/whetuu | all`). Pure list-filtering
-//! is split out for testing; the render/input loop is inherently terminal I/O
-//! and is exercised by hand.
+//! with the active one highlighted (`~/dev/whetuu | all`). Rows are syntax
+//! highlighted by `highlight.zig`, which is where the palette lives. Pure
+//! list-filtering is split out for testing; the render/input loop is inherently
+//! terminal I/O and is exercised by hand.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -17,6 +18,7 @@ const posix = std.posix;
 
 const Entry = @import("history.zig").Entry;
 const collapseHome = @import("module_directory.zig").collapseHome;
+const highlight = @import("highlight.zig");
 const style = @import("style.zig");
 const time_ago = @import("time_ago.zig");
 
@@ -30,6 +32,10 @@ const star = style.icon.star;
 /// Fixed width of the relative-time column, sized for the longest label
 /// ("11mo"), so commands line up just past it.
 const time_width = 4;
+
+/// Marks where a command too wide for the terminal lost its middle.
+const ellipsis = "…";
+const ellipsis_width = 1;
 
 /// Terminal dimensions, with sane fallbacks when the size cannot be queried.
 const Size = struct {
@@ -463,31 +469,137 @@ fn frame(arena: Allocator, f: *std.ArrayList(u8), query: []const u8, shown: []co
     try f.appendSlice(arena, try sanitize(arena, query));
 }
 
-/// Appends one list row: a fixed-width relative-time column then the command.
-/// The selected row spans the full width in the star's purple. The time column
-/// is muted on every row, selected or not, so only the command stands out.
+/// Appends one list row: a fixed-width relative-time column then the command,
+/// syntax highlighted. The selected row spans the full width in the star's
+/// purple and switches to the tints legible on it. The time column is muted on
+/// every row, selected or not, so only the command stands out.
 fn appendEntry(arena: Allocator, f: *std.ArrayList(u8), entry: Entry, now: i64, selected: bool, cols: usize) !void {
     var buf: [24]u8 = undefined;
     const when = time_ago.relative(&buf, now, entry.timestamp);
 
     const room = if (cols > time_width + 1) cols - time_width - 1 else 0;
-    const command = truncate(try sanitize(arena, entry.command), room);
+    const tokens = try highlight.tokenize(arena, try oneLine(arena, entry.command));
 
     if (!selected) {
         try f.appendSlice(arena, sgr.dim);
         try appendRightAligned(arena, f, when, time_width);
         try f.appendSlice(arena, sgr.reset ++ " ");
-        try f.appendSlice(arena, command);
+        _ = try appendCommand(arena, f, tokens, room, selected);
+        try f.appendSlice(arena, sgr.reset);
 
         return;
     }
 
     try f.appendSlice(arena, sgr.bg_purple ++ sgr.fg_lavender);
     try appendRightAligned(arena, f, when, time_width);
-    try f.appendSlice(arena, sgr.bright_white ++ " ");
-    try f.appendSlice(arena, command);
-    try appendSpaces(arena, f, cols - (time_width + 1 + width(command)));
+    try f.appendSlice(arena, " ");
+    const shown = try appendCommand(arena, f, tokens, room, selected);
+    try appendSpaces(arena, f, cols - (time_width + 1 + shown));
     try f.appendSlice(arena, sgr.reset);
+}
+
+/// Appends `tokens` colored by class, fitted to `cols` columns, and returns how
+/// many were used. A command too long to fit loses its middle rather than its
+/// end, so the program name and the tail that tells near-identical rows apart
+/// both survive: several `cd <long path> && git …` entries are otherwise one
+/// repeated prefix. The indicator belongs to no token, so it stays plain and
+/// never takes a token's color. Each token emits only a foreground escape,
+/// never a reset, so the selected row's background survives the whole command.
+fn appendCommand(arena: Allocator, f: *std.ArrayList(u8), tokens: []const highlight.Token, cols: usize, selected: bool) !usize {
+    const total = totalWidth(tokens);
+    if (total <= cols) return appendRange(arena, f, tokens, 0, total, selected);
+
+    // Too narrow to spend a column on the indicator, so fall back to a plain cut.
+    if (cols <= ellipsis_width) return appendRange(arena, f, tokens, 0, cols, selected);
+
+    const content = cols - ellipsis_width;
+    const kept_tail = content / 2;
+    _ = try appendRange(arena, f, tokens, 0, content - kept_tail, selected);
+    try appendStyled(arena, f, ellipsis, .plain, selected);
+    _ = try appendRange(arena, f, tokens, total - kept_tail, total, selected);
+
+    return cols;
+}
+
+/// Appends the part of `tokens` covering columns `[from, to)`, and returns how
+/// many columns that was. Tokens are consecutive slices of one command, so a
+/// range is found by counting columns across them rather than by re-measuring.
+fn appendRange(arena: Allocator, f: *std.ArrayList(u8), tokens: []const highlight.Token, from: usize, to: usize, selected: bool) !usize {
+    var at: usize = 0;
+    var used: usize = 0;
+    for (tokens) |token| {
+        const w = width(token.text);
+        const start = @max(at, from);
+        const end = @min(at + w, to);
+        at += w;
+        if (start >= end) continue;
+
+        const text = if (start == at - w and end == at) token.text else head(tail(token.text, at - start), end - start);
+        try appendStyled(arena, f, text, token.class, selected);
+        used += width(text);
+    }
+
+    return used;
+}
+
+/// Appends `text` in the color `class` gets on this kind of row.
+fn appendStyled(arena: Allocator, f: *std.ArrayList(u8), text: []const u8, class: highlight.Class, selected: bool) !void {
+    var buf: [style.escape_len]u8 = undefined;
+    const sty = if (selected) class.barStyle() else class.rowStyle();
+    try f.appendSlice(arena, style.sgrEscape(&buf, sty));
+    try f.appendSlice(arena, text);
+}
+
+/// Total display width of a tokenized command.
+fn totalWidth(tokens: []const highlight.Token) usize {
+    var total: usize = 0;
+    for (tokens) |token| total += width(token.text);
+    return total;
+}
+
+/// Returns `text` as the single line a list row shows: every whitespace run
+/// collapsed to one space, the ends trimmed, and every remaining control byte
+/// replaced by `?`. Collapsing has to come first, since a multi-line command
+/// round-trips through the store with real newlines and would otherwise arrive
+/// here as a row of `?`. This only changes how an entry is drawn — Enter and
+/// Tab both hand back the stored command untouched, so what runs is what was
+/// recorded, spacing and all.
+fn oneLine(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
+    if (!needsCollapsing(text)) return sanitize(arena, text);
+
+    var out: std.ArrayList(u8) = .empty;
+    var pending = false;
+    for (text) |c| {
+        if (std.ascii.isWhitespace(c)) {
+            pending = out.items.len > 0;
+            continue;
+        }
+        if (pending) {
+            try out.append(arena, ' ');
+            pending = false;
+        }
+
+        try out.append(arena, if (style.isControlByte(c)) '?' else c);
+    }
+
+    return out.toOwnedSlice(arena);
+}
+
+/// True when `text` holds whitespace that a row would render differently:
+/// anything but single interior spaces. Every non-space whitespace byte is a
+/// control byte, so `sanitize` alone would turn it into `?`.
+fn needsCollapsing(text: []const u8) bool {
+    if (text.len == 0) return false;
+    if (std.ascii.isWhitespace(text[0]) or std.ascii.isWhitespace(text[text.len - 1])) return true;
+
+    var prev_space = false;
+    for (text) |c| {
+        if (c != ' ' and std.ascii.isWhitespace(c)) return true;
+        if (c == ' ' and prev_space) return true;
+        prev_space = c == ' ';
+    }
+
+    return false;
 }
 
 /// Returns `text` with every control byte replaced by `?` (allocating only
@@ -526,14 +638,17 @@ fn width(text: []const u8) usize {
     return std.unicode.utf8CountCodepoints(text) catch text.len;
 }
 
-/// Caps a line to `cols` columns, backing off to a UTF-8 boundary so a
-/// multibyte glyph is never split mid-sequence.
-fn truncate(line: []const u8, cols: usize) []const u8 {
-    if (line.len <= cols) return line;
+/// The prefix of `text` that fits `cols` columns, cut on a UTF-8 boundary so a
+/// multibyte glyph is never split mid-sequence. The mirror of `tail`.
+fn head(text: []const u8, cols: usize) []const u8 {
+    var end: usize = 0;
+    var seen: usize = 0;
+    while (end < text.len and seen < cols) : (seen += 1) {
+        end += 1;
+        while (end < text.len and text[end] & 0xc0 == 0x80) end += 1;
+    }
 
-    var end: usize = cols;
-    while (end > 0 and line[end] & 0xc0 == 0x80) end -= 1;
-    return line[0..end];
+    return text[0..end];
 }
 
 /// Queries the terminal size, falling back to 24x80 when the ioctl is
@@ -675,13 +790,86 @@ test "frame drops the scope bar when the terminal is too narrow" {
     try std.testing.expect(std.mem.indexOf(u8, f.items, "BAR") == null);
 }
 
-test "selected row mutes the time column in lavender" {
+test "selected row mutes the time column in lavender and tints the command" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
+    const a = arena.allocator();
+    var buf: [style.escape_len]u8 = undefined;
+    const expected = try std.mem.concat(a, u8, &.{
+        sgr.fg_lavender ++ "  1m ",
+        style.sgrEscape(&buf, highlight.Class.command.barStyle()),
+        "ls",
+    });
+
     var f: std.ArrayList(u8) = .empty;
-    try appendEntry(arena.allocator(), &f, .{ .command = "ls", .timestamp = 40 }, 100, true, 80);
-    try std.testing.expect(std.mem.indexOf(u8, f.items, sgr.fg_lavender ++ "  1m" ++ sgr.bright_white ++ " ls") != null);
+    try appendEntry(a, &f, .{ .command = "ls", .timestamp = 40 }, 100, true, 80);
+    try std.testing.expect(std.mem.indexOf(u8, f.items, expected) != null);
+    try std.testing.expect(std.mem.indexOf(u8, f.items, sgr.reset) == f.items.len - sgr.reset.len);
+}
+
+test "rows color the command name apart from its arguments" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    var cmd_buf: [style.escape_len]u8 = undefined;
+    var plain_buf: [style.escape_len]u8 = undefined;
+    var flag_buf: [style.escape_len]u8 = undefined;
+    const expected = try std.mem.concat(a, u8, &.{
+        style.sgrEscape(&cmd_buf, highlight.Class.command.rowStyle()),
+        "ls",
+        style.sgrEscape(&plain_buf, highlight.Class.plain.rowStyle()),
+        " ",
+        style.sgrEscape(&flag_buf, highlight.Class.flag.rowStyle()),
+        "-la",
+        sgr.reset,
+    });
+
+    var f: std.ArrayList(u8) = .empty;
+    try appendEntry(a, &f, .{ .command = "ls -la", .timestamp = 40 }, 100, false, 80);
+    try std.testing.expect(std.mem.endsWith(u8, f.items, expected));
+}
+
+test "a row collapses whitespace runs and trims the ends" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    try std.testing.expectEqualStrings("git status", try oneLine(a, "  git   status  "));
+    try std.testing.expectEqualStrings("git status", try oneLine(a, "git\tstatus"));
+    try std.testing.expectEqualStrings("a b c", try oneLine(a, "a \t\n b\n\nc"));
+    try std.testing.expectEqualStrings("", try oneLine(a, "   "));
+    try std.testing.expectEqualStrings("", try oneLine(a, ""));
+}
+
+test "a multi-line command reads as one line rather than a row of question marks" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    const stored = "for f in *.zig\ndo\n\techo $f\ndone";
+    try std.testing.expectEqualStrings("for f in *.zig do echo $f done", try oneLine(a, stored));
+    try std.testing.expect(std.mem.indexOfScalar(u8, try oneLine(a, stored), '?') == null);
+}
+
+test "collapsing leaves an already single-spaced command untouched" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const command = "git commit -m 'one space between words'";
+    const got = try oneLine(arena.allocator(), command);
+    try std.testing.expectEqualStrings(command, got);
+    try std.testing.expect(got.ptr == command.ptr);
+}
+
+test "collapsing still defangs escape sequences" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    try std.testing.expectEqualStrings("ls ?[31mred", try oneLine(a, "ls  \x1b[31mred"));
+    try std.testing.expectEqualStrings("ls?[31mred", try oneLine(a, "ls\x1b[31mred"));
 }
 
 test "rows replace control bytes in stored commands" {
@@ -693,14 +881,136 @@ test "rows replace control bytes in stored commands" {
     try std.testing.expect(std.mem.indexOf(u8, f.items, "ls?[31mred") != null);
 }
 
+test "a highlighted row still stops at the terminal width" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var f: std.ArrayList(u8) = .empty;
+    const long = "echo 'aaaaaaaaaaaaaaaaaaaa' | grep --color bbbbbbbbbbbbbbbbbbbb";
+    try appendEntry(arena.allocator(), &f, .{ .command = long, .timestamp = 40 }, 100, true, 20);
+    try std.testing.expectEqual(@as(usize, 20), visibleWidth(f.items));
+}
+
+/// The visible text of a tokenized command fitted to `cols`, escapes stripped.
+fn fitted(arena: Allocator, command: []const u8, cols: usize) ![]const u8 {
+    var f: std.ArrayList(u8) = .empty;
+    _ = try appendCommand(arena, &f, try highlight.tokenize(arena, command), cols, false);
+
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < f.items.len) {
+        if (f.items[i] == 0x1b) {
+            while (i < f.items.len and f.items[i] != 'm') i += 1;
+            i += 1;
+            continue;
+        }
+        try out.append(arena, f.items[i]);
+        i += 1;
+    }
+
+    return out.toOwnedSlice(arena);
+}
+
+test "a command that fits is shown whole" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    try std.testing.expectEqualStrings("git status", try fitted(a, "git status", 10));
+    try std.testing.expectEqualStrings("git status", try fitted(a, "git status", 40));
+}
+
+test "a command too wide loses its middle, keeping the name and the tail" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    const long = "cd /home/davy/cf/platform/.claude/worktrees/csd-2147 && git commit -S -C";
+    try std.testing.expectEqualStrings("cd /home/davy/c…it commit -S -C", try fitted(a, long, 31));
+    try std.testing.expectEqualStrings("hello…world", try fitted(a, "hello there world", 11));
+}
+
+test "near-identical rows stay distinguishable once elided" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    const prefix = "cd /home/davy/cf/platform/.claude/worktrees/csd-2147 && ";
+    const one = try fitted(a, prefix ++ "git commit -S -C REBASE_HEAD", 40);
+    const two = try fitted(a, prefix ++ "GIT_EDITOR=true git rebase --continue", 40);
+    try std.testing.expect(!std.mem.eql(u8, one, two));
+    try std.testing.expect(std.mem.endsWith(u8, one, "REBASE_HEAD"));
+    try std.testing.expect(std.mem.endsWith(u8, two, "--continue"));
+}
+
+test "an elided row uses exactly the width it was given" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    const long = "cd ~/cf/tofu-plan-token && git commit -m 'fix: use TOFU_BOT_TOKEN' && git push";
+    var cols: usize = 1;
+    while (cols <= 90) : (cols += 1) {
+        const shown = try fitted(a, long, cols);
+        try std.testing.expectEqual(@min(cols, width(long)), width(shown));
+    }
+}
+
+test "the ellipsis is drawn plain so it never takes a token color" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    var buf: [style.escape_len]u8 = undefined;
+    const plain = style.sgrEscape(&buf, highlight.Class.plain.rowStyle());
+
+    var f: std.ArrayList(u8) = .empty;
+    _ = try appendCommand(a, &f, try highlight.tokenize(a, "nvim ~/.config/fish/config.fish"), 14, false);
+    try std.testing.expect(std.mem.indexOf(u8, f.items, try std.mem.concat(a, u8, &.{ plain, ellipsis })) != null);
+}
+
+test "a width too narrow for the indicator falls back to a plain cut" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const a = arena.allocator();
+    try std.testing.expectEqualStrings("", try fitted(a, "git status", 0));
+    try std.testing.expectEqualStrings("g", try fitted(a, "git status", 1));
+    try std.testing.expectEqualStrings("g…s", try fitted(a, "git status", 3));
+}
+
+/// Column count of `text` with every SGR escape skipped, for asserting that a
+/// colored row occupies exactly the width it claims.
+fn visibleWidth(text: []const u8) usize {
+    var cols: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        if (text[i] == 0x1b) {
+            while (i < text.len and text[i] != 'm') i += 1;
+            i += 1;
+            continue;
+        }
+        if (text[i] & 0xc0 != 0x80) cols += 1;
+        i += 1;
+    }
+
+    return cols;
+}
+
 test "queryFallback returns the trimmed query and null when empty" {
     try std.testing.expectEqualStrings("git push --force", queryFallback("git push --force ").?);
     try std.testing.expect(queryFallback("   ") == null);
     try std.testing.expect(queryFallback("") == null);
 }
 
-test "truncate backs off to a utf-8 boundary" {
-    // "·" is 2 bytes (0xc2 0xb7); a 1-column cap must not split it.
-    try std.testing.expectEqualStrings("", truncate("\xc2\xb7", 1));
-    try std.testing.expectEqualStrings("ab", truncate("abc", 2));
+test "head and tail cut on a utf-8 boundary and measure in columns" {
+    // "·" is 2 bytes (0xc2 0xb7) but one column, so a 1-column cap keeps it whole.
+    try std.testing.expectEqualStrings("\xc2\xb7", head("\xc2\xb7", 1));
+    try std.testing.expectEqualStrings("", head("\xc2\xb7", 0));
+    try std.testing.expectEqualStrings("a\xc2\xb7", head("a\xc2\xb7c", 2));
+    try std.testing.expectEqualStrings("ab", head("abc", 2));
+    try std.testing.expectEqualStrings("abc", head("abc", 9));
+
+    try std.testing.expectEqualStrings("\xc2\xb7c", tail("a\xc2\xb7c", 2));
+    try std.testing.expectEqualStrings("bc", tail("abc", 2));
 }
