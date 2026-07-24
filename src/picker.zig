@@ -88,9 +88,10 @@ pub const Options = struct {
 /// or null when the user cancels, the list is empty, or no controlling terminal
 /// is available. The list opens scoped to `opts.cwd` when that directory has
 /// history (all history otherwise) and Ctrl+G toggles the scope. Tab copies
-/// the selected entry into the query (with a trailing space) so flags can be
-/// appended; Enter returns the selected entry, or the query text itself when
-/// nothing matches it. Entry ages are re-read from the clock on every frame
+/// the selected entry into the query (with a trailing space) so it can be
+/// edited, and Enter then returns that text. Otherwise Enter returns the
+/// selected entry, or the query when nothing matches it. See `confirm`, which
+/// decides between the two. Entry ages are re-read from the clock on every frame
 /// and the key read times out once a second, so the time column stays live
 /// while the picker idles.
 ///
@@ -130,6 +131,9 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
     var shown: []const Entry = &.{};
     var rescope = true;
     var refilter = true;
+    // Set by Tab: the query is a command being edited, not a filter. See
+    // `confirm`.
+    var editing = false;
 
     while (true) {
         _ = frame_arena.reset(.retain_capacity);
@@ -167,11 +171,13 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
         switch (input.next(fd)) {
             .up => {
                 if (selected + 1 < shown.len) selected += 1;
+                editing = false;
             },
             .down => {
                 if (selected > 0) selected -= 1;
+                editing = false;
             },
-            .enter => return if (shown.len == 0) queryFallback(query.items) else shown[selected].command,
+            .enter => return confirm(editing, query.items, shown, selected),
             .tab => {
                 if (shown.len == 0) continue;
 
@@ -180,6 +186,7 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
                 query.append(arena, ' ') catch {};
                 selected = 0;
                 refilter = true;
+                editing = true;
             },
             .backspace => {
                 if (query.pop() != null) refilter = true;
@@ -197,6 +204,7 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
                 selected = 0;
                 rescope = true;
                 refilter = true;
+                editing = false;
             },
             .cancel => return null,
             .tick, .other => {},
@@ -317,6 +325,20 @@ fn matches(command: []const u8, query: []const u8) bool {
 fn queryFallback(query: []const u8) ?[]const u8 {
     const trimmed = std.mem.trim(u8, query, " ");
     return if (trimmed.len == 0) null else trimmed;
+}
+
+/// What Enter returns. Filtering, that is the selected entry. Editing, it is
+/// the query itself.
+///
+/// Tab starts editing, because it hands the selected command over as text to
+/// work on rather than as a narrower filter. The entry it came from keeps
+/// matching while you edit — dropping a bad argument leaves a query every
+/// remaining word of which is still in the original — so it stays selected and
+/// returning it would hand back the very command being fixed. Moving the
+/// selection is picking again, and ends editing.
+fn confirm(editing: bool, query: []const u8, shown: []const Entry, selected: usize) ?[]const u8 {
+    if (editing or shown.len == 0) return queryFallback(query);
+    return shown[selected].command;
 }
 
 /// Case-insensitive substring test. An empty needle always matches.
@@ -1196,6 +1218,29 @@ test "queryFallback returns the trimmed query and null when empty" {
     try std.testing.expectEqualStrings("git push --force", queryFallback("git push --force ").?);
     try std.testing.expect(queryFallback("   ") == null);
     try std.testing.expect(queryFallback("") == null);
+}
+
+test "Enter runs the edited query, not the entry Tab took it from" {
+    const good: Entry = .{ .command = "python3 -m http.server -d docs 8000", .cwd = "/w", .timestamp = 1 };
+    const typo: Entry = .{ .command = "python3 -m http.server -d docs 8000 sdf", .cwd = "/w", .timestamp = 2, .failed = true };
+
+    // Filtering: a few words narrow the list and Enter takes what is selected.
+    const both = [_]Entry{ typo, good };
+    try std.testing.expectEqualStrings(typo.command, confirm(false, "http.server", &both, 0).?);
+    try std.testing.expectEqualStrings(good.command, confirm(false, "http.server", &both, 1).?);
+
+    // Editing: Tab copied the failure in and the bad argument was deleted. The
+    // failure still matches every word left, so it is still shown and still
+    // selected. Enter has to hand back the text, or it re-runs the typo.
+    const fixed = "python3 -m http.server -d docs 8000 ";
+    try std.testing.expect(matches(typo.command, fixed));
+    try std.testing.expectEqualStrings(good.command, confirm(true, fixed, &both, 0).?);
+
+    // Editing down to nothing has nothing to run.
+    try std.testing.expect(confirm(true, "   ", &both, 0) == null);
+
+    // Filtering with no match falls back to the query, as it always has.
+    try std.testing.expectEqualStrings("git wip", confirm(false, "git wip ", &.{}, 0).?);
 }
 
 test "head and tail cut on a utf-8 boundary and measure in columns" {

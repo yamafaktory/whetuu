@@ -350,9 +350,11 @@ yet. A bar at the top names both scopes and highlights the active one, like
 - **↑ / ↓** — move the selection, where ↑ goes further back in time
 - **Ctrl+G** — switch between this directory's history and all history
 - **Tab** — copy the selected command into the search field, with a trailing
-  space, so you can edit it or append flags before running
-- **Enter** — run the selected command. When nothing matches the search text any
-  more, say after you added a flag, it runs the text as typed
+  space, so you can edit it or append flags before running. Enter then runs what
+  you typed, not the entry it came from
+- **Enter** — run the selected command, or the text you typed after a Tab.
+  Moving the selection with the arrows goes back to running the selection. With
+  no Tab, a search that matches nothing runs as typed
 - **Esc / Ctrl-C** — cancel, leaving whatever you had typed on the command line
 
 The picker behaves the same in all three shells.
