@@ -3,6 +3,13 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.8 — 2026-07-24
+
+### Changed
+
+- Paint the selected row to the last column
+- Answer an unknown command with one line, not the list
+
 ## v0.1.7 — 2026-07-24
 
 ### Changed
