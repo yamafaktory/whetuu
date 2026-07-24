@@ -260,10 +260,16 @@ test "paths reports both files, and says so when there is nowhere to write" {
     try std.testing.expectEqualStrings("/h/.local/share/whetuu/history", (try history.storePath(a, "", "/h")).?);
     try std.testing.expectEqualStrings("/h/.cache/whetuu/versions", (try version_cache.path(a, "", "/h")).?);
 
-    // Neither path is derived from the install directory, so uninstalling by
-    // removing ~/.whetuu cannot take the history with it.
-    try std.testing.expect(std.mem.indexOf(u8, (try history.storePath(a, "", "/h")).?, ".whetuu/") == null);
-    try std.testing.expect(std.mem.indexOf(u8, (try version_cache.path(a, "", "/h")).?, ".whetuu/") == null);
+    // whetuu creates no directory of its own in $HOME, so removing the binary
+    // from ~/.local/bin cannot take the history with it, and an uninstall has
+    // only paths the XDG spec already names to clean up.
+    for ([_][]const u8{
+        (try history.storePath(a, "", "/h")).?,
+        (try version_cache.path(a, "", "/h")).?,
+    }) |path| {
+        try std.testing.expect(std.mem.startsWith(u8, path, "/h/.local/share/") or
+            std.mem.startsWith(u8, path, "/h/.cache/"));
+    }
 
     try std.testing.expect((try history.storePath(a, "", "")) == null);
     try std.testing.expect((try version_cache.path(a, "", "")) == null);

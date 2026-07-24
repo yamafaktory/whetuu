@@ -162,7 +162,9 @@ workflows call `zig build release`, so it is the only place a target is named.
   Plex.
 - `install.sh` — the installer behind the `curl` one liner in the README. It
   resolves the latest release, verifies it against `SHA256SUMS`, installs to
-  `~/.whetuu/bin`, and appends two lines to the config of the shell in `$SHELL`.
+  `~/.local/bin` (the path the XDG spec names), and appends the init line to the
+  config of the shell in `$SHELL`. A `PATH` line joins it only when the install
+  directory is not already on `PATH`.
   Never uses sudo, because sudo cannot read a password when the script arrives
   through a pipe.
 - `glyphs.woff2` — four Nerd Font glyphs the page renders, subsetted out of

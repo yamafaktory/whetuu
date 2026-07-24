@@ -100,15 +100,16 @@ whetuu reads your repository and prints a line. Here is what that involves.
 
 - **No network access.** The binary has no socket, HTTP or DNS code. There is no
   telemetry and no update check.
-- **Your data is not in the install directory.** The history store and the
-  version cache follow the XDG base directory spec, so `rm -rf ~/.whetuu`
-  removes whetuu without touching the history you built up with it. Run
-  `whetuu paths` to see both locations, and whether each file exists yet.
-- **The installer edits one file, once.** It appends a `PATH` line and an
-  `init` line to the config of the shell in `$SHELL`, guarded so a second run
-  changes nothing. Not the config of a shell you do not use. Set
-  `WHETUU_NO_MODIFY=1` and it prints them instead. The binary itself goes in
-  `~/.whetuu/bin`, so `rm -rf ~/.whetuu` plus those two lines removes it.
+- **Every path is one the spec already names.** The binary goes in
+  `~/.local/bin`, the history store under `$XDG_DATA_HOME` and the version cache
+  under `$XDG_CACHE_HOME`. whetuu creates no directory of its own in `$HOME`.
+  Run `whetuu paths` to see both data locations, and whether each file exists
+  yet. [Uninstall](#uninstall) lists what to remove.
+- **The installer edits one file, once.** It appends an `init` line to the
+  config of the shell in `$SHELL`, guarded so a second run changes nothing. Not
+  the config of a shell you do not use. A `PATH` line joins it only when
+  `~/.local/bin` is not already on your `PATH`. Set `WHETUU_NO_MODIFY=1` and it
+  prints them instead.
 - **No config file.** whetuu has none, so there is no config parser and no
   format for anything to smuggle through. Running, it writes two files. One is
   the history
@@ -152,22 +153,9 @@ distinction goes away, and it goes away for every other tool you run too.
 
 ## Install
 
-```sh
-curl --proto '=https' --tlsv1.2 -fsSL https://yamafaktory.github.io/whetuu/install.sh | sh
-```
+Two ways. Neither is more supported than the other.
 
-That is the whole install. The script detects your platform, checks the download
-against the published `SHA256SUMS`, puts the binary in `~/.whetuu/bin`, and adds
-two lines to the config of the shell in `$SHELL`. Running it twice changes
-nothing. Open a new shell and the prompt is there.
-
-[Read it first](https://yamafaktory.github.io/whetuu/install.sh) if you would
-rather not pipe to a shell. Set `WHETUU_NO_MODIFY=1` and it prints the two lines
-instead of writing them, which [Shell setup](#shell-setup) also covers.
-Uninstalling is `rm -rf ~/.whetuu` and deleting those lines.
-
-<details>
-<summary>Other ways to install</summary>
+### Download the binary
 
 Prebuilt binaries are on the
 [releases page](https://github.com/yamafaktory/whetuu/releases), with a
@@ -181,9 +169,14 @@ Prebuilt binaries are on the
 | macOS Intel | `x86_64-macos` |
 
 ```sh
+sha256sum -c SHA256SUMS --ignore-missing
 tar -xzf whetuu-<version>-<target>.tar.gz
-sudo mv whetuu /usr/local/bin/
+mv whetuu ~/.local/bin/
 ```
+
+Then add one line to your shell config, which [Shell setup](#shell-setup)
+covers. That is the whole thing. The installer below does exactly this and
+nothing more.
 
 The macOS binaries are unsigned. Download one in a browser and Gatekeeper
 quarantines it, so the first run fails with *"cannot be opened because the
@@ -191,14 +184,51 @@ developer cannot be verified"*. Clear the flag once with
 `xattr -d com.apple.quarantine "$(command -v whetuu)"`. Downloading with `curl`
 or `wget` avoids the attribute entirely.
 
-**From source.** Needs Zig 0.17 (dev), see `minimum_zig_version` in
-`build.zig.zon` for the exact nightly:
+### Run the installer
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://yamafaktory.github.io/whetuu/install.sh | sh
+```
+
+It detects your platform, checks the download against the published
+`SHA256SUMS`, puts the binary in `~/.local/bin`, and adds the init line to the
+config of the shell in `$SHELL`. A `PATH` line joins it only when `~/.local/bin`
+is not already on your `PATH`, which on most systems it is. Running it twice
+changes nothing.
+
+[Read it first](https://yamafaktory.github.io/whetuu/install.sh) if you would
+rather not pipe to a shell, or take the download route above instead. The script
+saves you a `uname` and a checksum check. It is not a way to verify anything you
+could not verify yourself, and if this repository were compromised the script
+would be too.
+
+`WHETUU_NO_MODIFY=1` prints the lines instead of writing them.
+`WHETUU_INSTALL_DIR` puts the binary somewhere else, and then the shell config
+is left alone.
+
+### Uninstall
+
+```sh
+rm ~/.local/bin/whetuu
+rm -rf ~/.local/share/whetuu ~/.cache/whetuu
+```
+
+Then delete the `# whetuu` block from your shell config. The first line removes
+the program. The second removes the history store and the version cache, which
+live under the XDG directories rather than next to the binary. Run
+`whetuu paths` before you delete anything and it prints both locations, in case
+`$XDG_DATA_HOME` or `$XDG_CACHE_HOME` moves them on your machine.
+
+### From source
+
+Needs Zig 0.17 (dev), see `minimum_zig_version` in `build.zig.zon` for the exact
+nightly:
 
 ```sh
 git clone https://github.com/yamafaktory/whetuu.git
 cd whetuu
 zig build --release=fast
-sudo mv zig-out/bin/whetuu /usr/local/bin/
+mv zig-out/bin/whetuu ~/.local/bin/
 ```
 
 Other build steps:
@@ -212,14 +242,14 @@ zig build run          # build and run without installing
 
 Maintainers: see [`RELEASING.md`](RELEASING.md) for cutting a release.
 
-</details>
-
 ## Shell setup
 
-The installer already did this. This section is for a manual install, for
-`WHETUU_NO_MODIFY=1`, or for a shell whose config it could not find.
+The installer already did this. This section is for a download or source
+install, for `WHETUU_NO_MODIFY=1`, or for a shell whose config it could not
+find.
 
-Add the matching line to your shell config, then restart the shell:
+Add the matching line to your shell config, then restart the shell. Add
+`~/.local/bin` to your `PATH` first if it is not there already:
 
 **fish** — `~/.config/fish/config.fish`
 ```fish

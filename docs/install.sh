@@ -13,8 +13,9 @@
 #                        curl -fsSL <url> | WHETUU_INSTALL_DIR=/opt/bin sh
 #   WHETUU_VERSION       install a specific tag, e.g. v0.1.3 (default: latest)
 #
-# It appends two lines to the config of the shell in $SHELL, guarded so running
-# it twice changes nothing. Set WHETUU_NO_MODIFY=1 to have it print them
+# It appends the init line to the config of the shell in $SHELL, guarded so
+# running it twice changes nothing. A PATH line joins it only when the install
+# directory is not already on PATH. Set WHETUU_NO_MODIFY=1 to have it print them
 # instead. It touches no other file and never the config of a shell you do not
 # use.
 
@@ -22,6 +23,7 @@ set -eu
 
 repo=yamafaktory/whetuu
 tmp=
+default_dir="$HOME/.local/bin"
 
 die() {
     printf 'whetuu: %s\n' "$1" >&2
@@ -70,8 +72,9 @@ detect_target() {
     printf '%s-%s' "$cpu" "$suffix"
 }
 
-# A directory whetuu owns, so uninstalling is one `rm -rf` and nothing of yours
-# is mixed in with it.
+# The XDG Base Directory spec names $HOME/.local/bin for user-specific
+# executables, and most systems already have it on PATH. That usually leaves the
+# shell config one line shorter than a directory of our own would.
 #
 # Never /usr/local/bin. That needs sudo, and sudo cannot prompt for a password
 # when this script arrives through a pipe: stdin is the script itself. An
@@ -83,7 +86,16 @@ pick_dir() {
         return
     fi
 
-    printf '%s/.whetuu/bin' "$HOME"
+    printf '%s' "$default_dir"
+}
+
+# Whether $1 is already an entry in PATH, so the config never gains a line that
+# repeats what the system does for you.
+on_path() {
+    case ":${PATH:-}:" in
+        *":$1:"*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 command -v curl >/dev/null 2>&1 || need wget
@@ -136,10 +148,19 @@ chmod +x "$tmp/whetuu"
 
 dir=$(pick_dir)
 mkdir -p "$dir" 2>/dev/null || die "could not create $dir. Set WHETUU_INSTALL_DIR to a directory you can write to."
-[ -w "$dir" ] || die "$dir is not writable. Set WHETUU_INSTALL_DIR to a directory you can write to, for example: curl -fsSL <url> | WHETUU_INSTALL_DIR=\"\$HOME/.local/bin\" sh"
+[ -w "$dir" ] || die "$dir is not writable. Set WHETUU_INSTALL_DIR to a directory you can write to, for example: curl -fsSL <url> | WHETUU_INSTALL_DIR=\"\$HOME/bin\" sh"
 mv "$tmp/whetuu" "$dir/whetuu"
 
 say "installed $version to $dir/whetuu"
+
+# Versions up to 0.1.5 installed to ~/.whetuu/bin and put that on PATH ahead of
+# everything. Left alone it keeps winning, and the upgrade looks like it did
+# nothing. Say so rather than delete a directory we no longer own.
+if [ -e "$HOME/.whetuu" ]; then
+    say "note: an older install is still in $HOME/.whetuu, and the PATH line in"
+    say "      your shell config makes it win. Remove the directory and that"
+    say "      line, then open a new shell."
+fi
 
 # The shell in $SHELL is the login shell, so it owns the config file worth
 # editing. A shell we do not recognise gets instructions and no edits.
@@ -150,24 +171,42 @@ case "${SHELL:-}" in
     *) user_shell= ; rc= ;;
 esac
 
-# Written into the config verbatim. $HOME stays unexpanded so the file keeps
-# working if the account moves, which is what a shell config should do.
+# Written into the config verbatim, so it names the directory the binary really
+# went to rather than the default.
 lines_for() {
+    printf '\n# whetuu\n'
+    if [ "$needs_path" = yes ]; then
+        case "$1" in
+            fish) printf 'fish_add_path "%s"\n' "$path_literal" ;;
+            *) printf 'export PATH="%s:$PATH"\n' "$path_literal" ;;
+        esac
+    fi
     case "$1" in
-        fish)
-            printf '\n# whetuu\nfish_add_path "$HOME/.whetuu/bin"\nwhetuu init fish | source\n' ;;
-        zsh)
-            printf '\n# whetuu\nexport PATH="$HOME/.whetuu/bin:$PATH"\neval "$(whetuu init zsh)"\n' ;;
-        bash)
-            printf '\n# whetuu\nexport PATH="$HOME/.whetuu/bin:$PATH"\neval "$(whetuu init bash)"\n' ;;
+        fish) printf 'whetuu init fish | source\n' ;;
+        zsh) printf 'eval "$(whetuu init zsh)"\n' ;;
+        bash) printf 'eval "$(whetuu init bash)"\n' ;;
     esac
 }
+
+if on_path "$dir"; then
+    needs_path=no
+else
+    needs_path=yes
+fi
+
+# At the default the config gets $HOME unexpanded, so it keeps working if the
+# account moves. A directory you named is written out as you gave it.
+if [ "$dir" = "$default_dir" ]; then
+    path_literal='$HOME/.local/bin'
+else
+    path_literal=$dir
+fi
 
 configured=no
 if [ -n "$user_shell" ] && [ "${WHETUU_NO_MODIFY:-}" != 1 ]; then
     # A custom install dir is not what the lines above assume, so leave the
     # config alone rather than write a path that is wrong.
-    if [ "$dir" != "$HOME/.whetuu/bin" ]; then
+    if [ "$dir" != "$default_dir" ]; then
         say "custom install directory, so your shell config is left alone"
     elif [ -f "$rc" ] && grep -q 'whetuu init' "$rc" 2>/dev/null; then
         say "$rc already sets up whetuu, leaving it alone"

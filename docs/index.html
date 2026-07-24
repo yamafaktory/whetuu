@@ -185,7 +185,9 @@ code, kbd { font-family: var(--mono); font-size: 0.9em; }
 .cmd {
   display: flex;
   align-items: stretch;
-  margin-top: 2rem;
+  /* Symmetric enough that anything can follow it. Paragraphs here carry a
+     bottom margin only, so a block that owns no space below would touch. */
+  margin: 2rem 0 1rem;
   background: #16141f;
   border-radius: 8px;
   overflow: hidden;
@@ -223,7 +225,6 @@ code, kbd { font-family: var(--mono); font-size: 0.9em; }
 .cmd button:hover { background: var(--accent); color: #fff; }
 .cmd button[data-done] { color: var(--accent); }
 .cmd button[data-done]:hover { color: #fff; }
-#install .avail { margin-bottom: 2.2rem; }
 .avail { margin: 0.9rem 0 0; font-family: var(--mono); font-size: 0.85rem; color: var(--muted); }
 
 /* ---- actions ---- */
@@ -337,7 +338,9 @@ pre .c { color: var(--muted); }
 .note {
   border-left: 2px solid var(--accent);
   padding: 0.15rem 0 0.15rem 1rem;
-  margin: 1.75rem 0 0;
+  /* Symmetric, so anything can follow a note. Adjacent margins collapse, so
+     note after note is still one gap. */
+  margin: 1.75rem 0;
   color: var(--muted);
   font-size: 1rem;
 }
@@ -483,19 +486,34 @@ footer p { margin: 0 0 0.4rem; }
 
 <section class="wrap" id="install">
   <p class="eyebrow">~/install</p>
-  <h2>One command</h2>
+  <h2>Two ways</h2>
 
-  <p><b>1.</b> Run it. The installer detects your platform, checks the download against the published <code>SHA256SUMS</code>, puts the binary in <code>~/.whetuu/bin</code>, and adds two lines to the config of the shell you actually use. Running it twice changes nothing.</p>
+  <p><b>Download the binary.</b> Grab the tarball for your platform, check it against the published <code>SHA256SUMS</code>, and put it on your <code>PATH</code>. Then add one line to your shell config.</p>
+  <div class="cmd">
+    <code><span class="sigil">$</span> sha256sum -c SHA256SUMS --ignore-missing &amp;&amp; tar -xzf whetuu-*.tar.gz &amp;&amp; mv whetuu ~/.local/bin/</code>
+    <button type="button" data-copy="sha256sum -c SHA256SUMS --ignore-missing &amp;&amp; tar -xzf whetuu-*.tar.gz &amp;&amp; mv whetuu ~/.local/bin/">Copy</button>
+  </div>
+  <p><a href="https://github.com/yamafaktory/whetuu/releases/latest">Tarballs and checksums</a> are on the releases page, for macOS and Linux on x86-64 and ARM64.</p>
+
+  <p><b>Or run the installer.</b> It does the same thing, and saves you a <code>uname</code>. It detects your platform, verifies the download, puts the binary in <code>~/.local/bin</code>, and adds the init line to the config of the shell you actually use. Running it twice changes nothing.</p>
   <div class="cmd">
     <code><span class="sigil">$</span> curl --proto '=https' --tlsv1.2 -fsSL https://yamafaktory.github.io/whetuu/install.sh | sh</code>
     <button type="button" data-copy="curl --proto &#39;=https&#39; --tlsv1.2 -fsSL https://yamafaktory.github.io/whetuu/install.sh | sh">Copy</button>
   </div>
-  <p class="avail">macOS and Linux · <a href="https://yamafaktory.github.io/whetuu/install.sh">read the script</a> · <a href="https://github.com/yamafaktory/whetuu/releases/latest">tarballs and checksums</a></p>
+  <p><a href="https://yamafaktory.github.io/whetuu/install.sh">Read the script</a> first if you would rather not pipe to a shell. It verifies nothing you could not verify yourself.</p>
 
-  <p><b>2.</b> Open a new shell. That is the whole install.</p>
-  <p class="note">Would rather edit your own dotfiles? Run it with <code>WHETUU_NO_MODIFY=1</code> and it prints the two lines instead of writing them. <code>whetuu init &lt;shell&gt;</code> prints them too, along with the file they belong in. Uninstalling is <code>rm -rf ~/.whetuu</code> plus those lines.</p>
+  <p>Then open a new shell. That is the whole install.</p>
+  <p class="note">Would rather edit your own dotfiles? Run it with <code>WHETUU_NO_MODIFY=1</code> and it prints the lines instead of writing them. <code>whetuu init &lt;shell&gt;</code> prints them too, along with the file they belong in. A <code>PATH</code> line appears only when <code>~/.local/bin</code> is not already on your <code>PATH</code>.</p>
 
   <p class="note"><b>You need a <a href="https://www.nerdfonts.com/">Nerd Font</a>.</b> The prompt uses Nerd Font glyphs for the git branch, the language logos and the prompt character. Without one, those show as empty boxes.</p>
+
+  <h3>Uninstalling</h3>
+  <p>One line for the program, one for the data. The history store and the version cache live under the XDG directories rather than next to the binary, so removing whetuu never takes your history with it. Run <code>whetuu paths</code> first if you want to see both locations, in case <code>$XDG_DATA_HOME</code> or <code>$XDG_CACHE_HOME</code> moves them on your machine.</p>
+  <div class="cmd">
+    <code><span class="sigil">$</span> rm ~/.local/bin/whetuu &amp;&amp; rm -rf ~/.local/share/whetuu ~/.cache/whetuu</code>
+    <button type="button" data-copy="rm ~/.local/bin/whetuu &amp;&amp; rm -rf ~/.local/share/whetuu ~/.cache/whetuu">Copy</button>
+  </div>
+  <p>Then delete the <code># whetuu</code> block from your shell config.</p>
 </section>
 <section class="wrap" id="demo">
   <p class="eyebrow">~/demo</p>
@@ -592,8 +610,8 @@ footer p { margin: 0 0 0.4rem; }
   <dl class="mods">
     <div class="mod"><dt>No network</dt><dd>There is no socket, no HTTP client and no sync anywhere in the binary. No telemetry and no update check. There is no account and no server to opt out of.</dd></div>
     <div class="mod"><dt>Two files</dt><dd>Running, whetuu writes exactly two. The history store, created with mode <b>600</b> and reset to it on every write, so one left readable by an older version corrects itself. And a cache of toolchain version strings at <b>~/.cache/whetuu/versions</b>, which holds nothing else and can be deleted whenever you like.</dd></div>
-    <div class="mod"><dt>Data outside it</dt><dd>Both files follow the XDG base directory spec, so neither lives in the install directory. Removing whetuu with <b>rm -rf ~/.whetuu</b> cannot take your history with it. <b>whetuu paths</b> prints both locations.</dd></div>
-    <div class="mod"><dt>One install edit</dt><dd>The installer appends two lines to the config of the shell in <b>$SHELL</b>, and nothing else. Not the config of a shell you do not use, and never twice. <b>WHETUU_NO_MODIFY=1</b> makes it print them instead. Everything lands in <b>~/.whetuu</b>, so removing it is one directory.</dd></div>
+    <div class="mod"><dt>Spec paths only</dt><dd>The binary goes in <b>~/.local/bin</b>, the history store under <b>$XDG_DATA_HOME</b> and the version cache under <b>$XDG_CACHE_HOME</b>. No directory of our own in your <b>$HOME</b>. <b>whetuu paths</b> prints both data locations.</dd></div>
+    <div class="mod"><dt>One install edit</dt><dd>The installer appends the init line to the config of the shell in <b>$SHELL</b>, and nothing else. Not the config of a shell you do not use, and never twice. A <b>PATH</b> line joins it only when <b>~/.local/bin</b> is not already on your <b>PATH</b>. <b>WHETUU_NO_MODIFY=1</b> makes it print them instead.</dd></div>
     <div class="mod"><dt>Skip a command</dt><dd>Start a command with a space and it is never recorded. Use it for the ones carrying a token. Only successful commands are stored at all.</dd></div>
     <div class="mod"><dt>No shell, ever</dt><dd>whetuu runs two subprocesses: <b>git</b> and the toolchain version probe. Both get a fixed list of arguments rather than a command line, so nothing you type is ever interpreted as a command. State like a rebase in progress is read straight out of <b>.git</b> with no subprocess at all.</dd></div>
     <div class="mod"><dt>Escapes defanged</dt><dd>Every control byte in a command, a branch name or a directory becomes a <b>?</b> before it reaches your terminal. A repository you just cloned cannot repaint your screen or move your cursor through whetuu.</dd></div>
