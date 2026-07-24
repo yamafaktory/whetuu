@@ -33,6 +33,33 @@ few minutes later, at
 [Actions](https://github.com/yamafaktory/whetuu/actions) and then
 [Releases](https://github.com/yamafaktory/whetuu/releases).
 
+## The changelog
+
+[`CHANGELOG.md`](CHANGELOG.md) tracks every release in the repository, so the
+history is readable without the releases page and travels with a clone.
+
+It is generated, never edited. `zig build publish` regenerates it with the
+pending tag and commits it alongside the version bump, so a release cannot ship
+a stale one. Nothing to remember and nothing to rename.
+
+```sh
+zig build changelog        # preview, with what has landed under Unreleased
+```
+
+**The commit subject is the changelog entry.** That is the whole input, so
+write the subject for a user of whetuu, in the imperative, and the entry needs
+no further work. Detail that only a maintainer wants goes in the commit body,
+which never appears in the file.
+
+Sections come from the leading verb. `Add` files under Added, `Fix` under
+Fixed, `Remove` under Removed, everything else under Changed. Getting that
+wrong costs a heading, never an entry.
+
+A commit that changes nothing a user can observe goes in
+[`tools/changelog-skip.txt`](tools/changelog-skip.txt) by full SHA. Reach for
+it rarely. A subject worth publishing is the better fix, and the list only
+exists because the early history predates the rule.
+
 ## Pre-releases
 
 A tag with a semver suffix is published as a GitHub pre-release, so it never

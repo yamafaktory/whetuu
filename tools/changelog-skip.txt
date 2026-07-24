@@ -1,0 +1,22 @@
+# Commits tools/changelog.sh leaves out of CHANGELOG.md, one full SHA per line.
+#
+# For work that changed nothing a user of whetuu can observe: repository
+# scaffolding, maintainer tooling, and edits to docs that only a maintainer
+# reads. Everything else belongs in the changelog, so add to this list rarely
+# and prefer writing a commit subject worth publishing.
+
+# Repository scaffolding, before there was anything to describe.
+78ee9986779d8792d70f0b7a2bc3e5a2a671bf28  First commit
+2103bd07984e231fe777d4f121d9b53cdf592786  Update readme
+3122278ff9685fe1c338a2b45bc04bee26b7d192  fix readme
+560e9c64d58be26c5afd92a723aa536371ab4855  Adopt Zig master code style
+
+# Release tooling. Real work, but it changes how a release is cut, not whetuu.
+c09fb14497e5de76847d317133b012f0f4d55718  Make publish cut a release end to end
+8c13dfaef1b60f652180db6e5a1c1749eb7e8117  Take the publish tag after -- instead of -Dversion
+3b8a3e5cd4223a902fdaa26da5a3e835af19d5a9  Publish suffixed tags as GitHub pre-releases
+
+# Prose edits to files a user never opens.
+0663c8afe20b5dfb918d83721d15077504404875  Simplify the README prose
+182f872fcb67fde74e53cbef3223f340afb632a6  Restore the tagline as the README opening line
+84f748a79ec7bd48ae2bec940266c4a6ba997b0b  Note that the site deploys on push, not on release

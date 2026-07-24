@@ -150,6 +150,8 @@ by someone deciding whether to use whetuu, so it has to be plain.
 - `zig build demo` — re-record `docs/demo.cast` and render the README's
   `docs/demo.gif` (see `RELEASING.md`); run it whenever the status line or picker
   changes visibly
+- `zig build changelog` — regenerate `CHANGELOG.md` from the commit history.
+  `publish` runs it with the pending tag, so this is only for previewing
 - `zig build bump -- vX.Y.Z` — set `.version` in `build.zig.zon` and nothing else
 - `zig build publish -- vX.Y.Z` — cut a release end to end: bump, commit, push
   `main`, wait for CI on that commit, then tag and push the tag (see
@@ -158,6 +160,12 @@ by someone deciding whether to use whetuu, so it has to be plain.
 
 The published target list lives in `release_targets` in `build.zig`, and both CI
 workflows call `zig build release`, so it is the only place a target is named.
+
+`CHANGELOG.md` is generated from commit subjects by `zig build changelog`, and
+`publish` regenerates it. Never edit it. The commit subject is the entry, so
+write it for a user of whetuu, in the imperative, and put maintainer detail in
+the commit body instead. Work a user cannot observe goes in
+`tools/changelog-skip.txt` by full SHA, rarely.
 
 ## The site
 

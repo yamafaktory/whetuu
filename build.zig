@@ -88,6 +88,15 @@ pub fn build(b: *std.Build) void {
     bump.stdio = .inherit;
     bump_step.dependOn(&bump.step);
 
+    // CHANGELOG.md is derived from the commit history, so it is regenerated
+    // rather than edited. `publish` runs the same script with the pending tag.
+    const changelog_step = b.step("changelog", "Regenerate CHANGELOG.md from the commit history");
+    const changelog = b.addSystemCommand(&.{"bash"});
+    changelog.addFileArg(b.path("tools/changelog.sh"));
+    changelog.addPassthruArgs();
+    changelog.stdio = .inherit;
+    changelog_step.dependOn(&changelog.step);
+
     // Publishing bumps, pushes and tags, but never builds what ships — the
     // workflow does that from a clean checkout of the tag.
     const publish_step = b.step("publish", "Cut a release: bump, push, wait for CI, then tag (zig build publish -- vX.Y.Z)");

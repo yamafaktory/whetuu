@@ -3,7 +3,8 @@
 # Cuts a release end to end. Invoked by `zig build publish -- vX.Y.Z`:
 #
 #   1. checks the tree, the branch and the tag before touching anything
-#   2. bumps build.zig.zon and commits it (skipped when already correct)
+#   2. bumps build.zig.zon, regenerates CHANGELOG.md, and commits both
+#      (skipped when both are already correct)
 #   3. pushes main
 #   4. waits for CI to pass on that exact commit
 #   5. tags and pushes the tag, triggering .github/workflows/release.yml
@@ -68,12 +69,19 @@ fi
 
 # ---------------------------------------------------------------- bump + push
 
-if bash tools/bump.sh "$version" | grep -q '\->'; then
-    git add build.zig.zon
-    git commit --quiet -m "Release $version"
-    say "committed the build.zig.zon bump"
+bash tools/bump.sh "$version"
+
+# Regenerated with the pending tag, so the section that was Unreleased becomes
+# this version. Both files ride in the one commit CI then runs on.
+bash tools/changelog.sh "$version"
+
+# The tree was checked clean above, so nothing but these two can be staged.
+git add build.zig.zon CHANGELOG.md
+if git diff --cached --quiet; then
+    say "build.zig.zon and CHANGELOG.md already current for $version"
 else
-    say "build.zig.zon already at ${version#v}"
+    git commit --quiet -m "Release $version"
+    say "committed the version bump and the changelog"
 fi
 
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$branch")" ]; then
