@@ -3,6 +3,12 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.7 — 2026-07-24
+
+### Changed
+
+- Open the picker in the same time on a store of any size
+
 ## v0.1.6 — 2026-07-24
 
 ### Changed
