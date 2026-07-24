@@ -60,6 +60,39 @@ A commit that changes nothing a user can observe goes in
 it rarely. A subject worth publishing is the better fix, and the list only
 exists because the early history predates the rule.
 
+## Releases that need a migration step
+
+Generated notes are a list of commit titles. They have no room for "here is what
+to do to your machine before this works". A release that moves a path or changes
+an install location writes that in `release_notes/<tag>.md`:
+
+```sh
+$EDITOR release_notes/v0.1.6.md
+```
+
+Commit it before tagging. The release workflow picks up the file matching the
+tag and GitHub puts it above the generated list. Nothing to run by hand, and no
+`gh` on your machine. A tag with no matching file publishes as it always did, so
+most releases need nothing here.
+
+A pre-release falls back to the stable version it rehearses. Tagging
+`v0.1.6-rc.1` publishes `release_notes/v0.1.6.md`, which is what makes the
+rehearsal worth doing. Name a file after the full pre-release tag to override
+that.
+
+A release note and a changelog entry are not the same thing. `CHANGELOG.md`
+records what changed. `release_notes/<tag>.md` tells the reader what to do about
+it, and only exists for releases that ask something of them. A release that
+needs both repeats the summary, which is the right trade: one is read in a
+clone, the other on the releases page, and neither reader has the other open.
+
+Keep the file to what the reader has to do. It does not belong in `README.md`.
+That file describes the current version to someone deciding whether to use
+whetuu, and a note aimed at people upgrading from one specific old version goes
+stale on the next release. Where the upgrade can be detected at runtime, say it
+there too. The installer checking for a leftover `~/.whetuu` reaches the
+affected user at the moment it matters and nobody else.
+
 ## Pre-releases
 
 A tag with a semver suffix is published as a GitHub pre-release, so it never

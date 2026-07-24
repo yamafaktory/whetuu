@@ -30,18 +30,36 @@ jobs:
       - name: Checksum
         run: (cd zig-out/release && sha256sum ./*.tar.gz > SHA256SUMS)
 
-      # A semver pre-release suffix (v1.2.3-rc.1) must not be published as the
-      # latest stable release — that is what the install docs point people at.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.ref_name }}
         run: |
+          extra=()
+
+          # A semver pre-release suffix (v1.2.3-rc.1) must not be published as
+          # the latest stable release — that is what the install docs point
+          # people at.
           case "$VERSION" in
-            *-*) prerelease=--prerelease ;;
-            *)   prerelease= ;;
+            *-*) extra+=(--prerelease) ;;
           esac
+
+          # Generated notes are a list of commit titles, with nowhere to say
+          # "do this to your machine before the upgrade works". A release that
+          # needs one commits release_notes/<tag>.md, and GitHub puts it above
+          # the generated list. No file means nothing to migrate.
+          #
+          # A pre-release falls back to the stable version it rehearses, so
+          # v0.1.6-rc.1 publishes the v0.1.6 notes and the rehearsal covers
+          # this step too. An exact match still wins.
+          notes="release_notes/$VERSION.md"
+          [ -f "$notes" ] || notes="release_notes/${VERSION%%-*}.md"
+          if [ -f "$notes" ]; then
+            extra+=(--notes-file "$notes")
+            echo "using $notes"
+          fi
+
           gh release create "$VERSION" zig-out/release/* \
             --title "$VERSION" \
             --generate-notes \
-            ${prerelease:+"$prerelease"}
+            "${extra[@]}"

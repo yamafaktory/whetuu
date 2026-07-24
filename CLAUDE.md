@@ -167,6 +167,11 @@ write it for a user of whetuu, in the imperative, and put maintainer detail in
 the commit body instead. Work a user cannot observe goes in
 `tools/changelog-skip.txt` by full SHA, rarely.
 
+A change that makes users do something to their machine before the new version
+works also needs `release_notes/<tag>.md`, committed before the tag. The release
+workflow finds it by tag name and GitHub prints it above the generated notes.
+Nothing like that goes in `README.md`. See `RELEASING.md`.
+
 ## The site
 
 `docs/` is served by GitHub Pages at `https://yamafaktory.github.io/whetuu/`.
