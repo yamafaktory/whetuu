@@ -160,6 +160,23 @@ pub fn single(arena: Allocator, sty: Style, text: []const u8) Allocator.Error![]
 /// True for bytes that must never reach the terminal raw (C0 controls and
 /// DEL): they enable escape-sequence injection through untrusted text such as
 /// directory or command names.
+/// Returns `text` with every control byte replaced by `?`, allocating only
+/// when there is one to replace. Anything that reaches the terminal from a
+/// command line, a branch name or a directory goes through here first, so a
+/// repository you just cloned cannot repaint your screen through whetuu.
+pub fn sanitize(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
+    for (text) |c| {
+        if (isControlByte(c)) break;
+    } else return text;
+
+    const out = try arena.dupe(u8, text);
+    for (out) |*c| {
+        if (isControlByte(c.*)) c.* = '?';
+    }
+
+    return out;
+}
+
 pub fn isControlByte(c: u8) bool {
     return c < 0x20 or c == 0x7f;
 }
@@ -226,6 +243,22 @@ test "control bytes in text are replaced, styled or not" {
     var styled: Writer = .fixed(&buf);
     try write(&styled, .fish, .{ .color = .red }, "\x1bc");
     try std.testing.expectEqualStrings("\x1b[31m?c\x1b[0m", styled.buffered());
+}
+
+test "sanitize defangs control bytes and leaves clean text alone" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // Nothing to replace, so the input comes back untouched and unallocated.
+    const clean = "git commit -m ok";
+    try std.testing.expectEqual(clean.ptr, (try sanitize(a, clean)).ptr);
+
+    // The escape byte itself is what makes a sequence, so replacing it leaves
+    // the rest as inert text rather than something the terminal acts on.
+    try std.testing.expectEqualStrings("?[31mred", try sanitize(a, "\x1b[31mred"));
+    try std.testing.expectEqualStrings("a?]2;x?b", try sanitize(a, "a\x1b]2;x\x07b"));
+    try std.testing.expectEqualStrings("", try sanitize(a, ""));
 }
 
 test "rgb emits a truecolor escape and overrides color" {

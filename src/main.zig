@@ -53,7 +53,33 @@ pub fn main(init: std.process.Init) !void {
         return runPaths(io, arena, init.environ_map);
     }
 
-    return usage(io);
+    return unknownSubcommand(io, arena, sub);
+}
+
+/// One line and a failing status for a subcommand that does not exist, rather
+/// than the whole command list.
+///
+/// The shell hook runs whetuu before every command, so this is not only what a
+/// typo hits. A shell started before an upgrade keeps calling whatever the
+/// integration script said when the session began, and if that subcommand has
+/// since been renamed, every prompt lands here. Printing the command list then
+/// buries the terminal in it once per command. One line names what was called,
+/// which is the thing worth knowing, and a non-zero status lets a caller tell
+/// this apart from an empty render.
+fn unknownSubcommand(io: Io, arena: Allocator, sub: []const u8) !void {
+    var buf: [512]u8 = undefined;
+    var fw = Io.File.stderr().writer(io, &buf);
+
+    // Straight off the command line, so it can hold anything at all. Nothing
+    // reaches the terminal without going through `sanitize` first.
+    const safe = try style.sanitize(arena, sub);
+    try fw.interface.print(
+        "whetuu: no such command {s}{s}{s}. Run {s}whetuu{s} for the list.\n",
+        .{ style.sgr.bold, safe, style.sgr.reset, style.sgr.fg_purple, style.sgr.reset },
+    );
+    try fw.interface.flush();
+
+    std.process.exit(2);
 }
 
 /// Prints where whetuu keeps its two files, and whether each exists yet.

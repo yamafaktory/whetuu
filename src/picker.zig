@@ -591,7 +591,7 @@ const Frame = struct {
         // scrolls, leaving the cursor parked right after the query. The query is
         // sanitized because Tab can copy a stored command into it.
         try f.appendSlice(arena, sgr.fg_purple ++ star ++ sgr.reset ++ " ");
-        try f.appendSlice(arena, try sanitize(arena, fr.query));
+        try f.appendSlice(arena, try style.sanitize(arena, fr.query));
         try f.appendSlice(arena, "\x1b[J" ++ show_cursor);
     }
 };
@@ -707,7 +707,7 @@ fn totalWidth(tokens: []const highlight.Token) usize {
 /// Tab both hand back the stored command untouched, so what runs is what was
 /// recorded, spacing and all.
 fn oneLine(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
-    if (!needsCollapsing(text)) return sanitize(arena, text);
+    if (!needsCollapsing(text)) return style.sanitize(arena, text);
 
     var out: std.ArrayList(u8) = .empty;
     var pending = false;
@@ -742,22 +742,6 @@ fn needsCollapsing(text: []const u8) bool {
     }
 
     return false;
-}
-
-/// Returns `text` with every control byte replaced by `?` (allocating only
-/// when needed), so a stored command cannot inject escape sequences into the
-/// list it is rendered in.
-fn sanitize(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
-    for (text) |c| {
-        if (style.isControlByte(c)) break;
-    } else return text;
-
-    const out = try arena.dupe(u8, text);
-    for (out) |*c| {
-        if (style.isControlByte(c.*)) c.* = '?';
-    }
-
-    return out;
 }
 
 /// Pads with spaces to `w` columns then appends `s`, right-aligning it so the
