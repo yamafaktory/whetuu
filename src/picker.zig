@@ -574,8 +574,17 @@ const Frame = struct {
         var row: usize = 0;
         while (row < fr.list_rows) : (row += 1) {
             const idx = fr.base + (fr.list_rows - 1 - row);
-            if (idx < fr.shown.len) try appendEntry(arena, f, fr.shown[idx], fr.now, idx == fr.selected, fr.cols);
-            try f.appendSlice(arena, "\x1b[K\r\n");
+            const painted = if (idx < fr.shown.len)
+                try appendEntry(arena, f, fr.shown[idx], fr.now, idx == fr.selected, fr.cols)
+            else
+                0;
+
+            // A row that already covers the width has nothing left to clear,
+            // and writing the last column leaves the cursor on it rather than
+            // past it, so erasing from there would blank the cell just drawn.
+            // That is the selected row losing its final column of purple.
+            if (painted < fr.cols) try f.appendSlice(arena, "\x1b[K");
+            try f.appendSlice(arena, "\r\n");
         }
 
         // Search line pinned to the last row; no trailing newline so it never
@@ -593,7 +602,7 @@ const Frame = struct {
 /// every row, selected or not, so only the command stands out. The ephemeral
 /// just-failed entry carries a red star between the time column and the
 /// command, the same emblem the status line reddens after a failure.
-fn appendEntry(arena: Allocator, f: *std.ArrayList(u8), entry: Entry, now: i64, selected: bool, cols: usize) !void {
+fn appendEntry(arena: Allocator, f: *std.ArrayList(u8), entry: Entry, now: i64, selected: bool, cols: usize) !usize {
     var buf: [24]u8 = undefined;
     const when = time_ago.relative(&buf, now, entry.timestamp);
 
@@ -605,10 +614,10 @@ fn appendEntry(arena: Allocator, f: *std.ArrayList(u8), entry: Entry, now: i64, 
         try f.appendSlice(arena, sgr.dim);
         try appendRightAligned(arena, f, when, time_width);
         try f.appendSlice(arena, sgr.reset ++ " ");
-        _ = try appendCommand(arena, f, tokens, room, selected, override);
+        const shown = try appendCommand(arena, f, tokens, room, selected, override);
         try f.appendSlice(arena, sgr.reset);
 
-        return;
+        return @min(time_width + 1 + shown, cols);
     }
 
     // The failed entry gets a red bar with white text instead of the purple one.
@@ -622,6 +631,9 @@ fn appendEntry(arena: Allocator, f: *std.ArrayList(u8), entry: Entry, now: i64, 
     const shown = try appendCommand(arena, f, tokens, room, selected, override);
     try appendSpaces(arena, f, cols -| (time_width + 1 + shown));
     try f.appendSlice(arena, sgr.reset);
+
+    // Padded to the full width, which is what makes the bar span the row.
+    return @max(time_width + 1 + shown, cols);
 }
 
 /// Appends `tokens` colored by class, fitted to `cols` columns, and returns how
@@ -989,9 +1001,32 @@ test "selected row mutes the time column in lavender and tints the command" {
     });
 
     var f: std.ArrayList(u8) = .empty;
-    try appendEntry(a, &f, .{ .command = "ls", .timestamp = 40 }, 100, true, 80);
+    _ = try appendEntry(a, &f, .{ .command = "ls", .timestamp = 40 }, 100, true, 80);
     try std.testing.expect(std.mem.indexOf(u8, f.items, expected) != null);
     try std.testing.expect(std.mem.indexOf(u8, f.items, sgr.reset) == f.items.len - sgr.reset.len);
+}
+
+test "the selected row reports the full width so it is never cleared back" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // The frame only clears a row that stopped short. A selected row is padded
+    // to the edge, so reporting less than the width would have the clear erase
+    // the last cell it just painted — the bar stopping one column early.
+    var sel: std.ArrayList(u8) = .empty;
+    const painted = try appendEntry(a, &sel, .{ .command = "ls", .timestamp = 40 }, 100, true, 80);
+    try std.testing.expectEqual(@as(usize, 80), painted);
+
+    // A command wider than the row still reports the width, never more.
+    var wide: std.ArrayList(u8) = .empty;
+    const long = "cd /home/davy/cf/platform/.claude/worktrees/csd-2147 && git commit -S -C REBASE_HEAD";
+    try std.testing.expectEqual(@as(usize, 80), try appendEntry(a, &wide, .{ .command = long, .timestamp = 40 }, 100, true, 80));
+
+    // An unselected row is not padded, so it does stop short and does get
+    // cleared.
+    var plain: std.ArrayList(u8) = .empty;
+    try std.testing.expect(try appendEntry(a, &plain, .{ .command = "ls", .timestamp = 40 }, 100, false, 80) < 80);
 }
 
 test "rows color the command name apart from its arguments" {
@@ -1013,7 +1048,7 @@ test "rows color the command name apart from its arguments" {
     });
 
     var f: std.ArrayList(u8) = .empty;
-    try appendEntry(a, &f, .{ .command = "ls -la", .timestamp = 40 }, 100, false, 80);
+    _ = try appendEntry(a, &f, .{ .command = "ls -la", .timestamp = 40 }, 100, false, 80);
     try std.testing.expect(std.mem.endsWith(u8, f.items, expected));
 }
 
@@ -1063,7 +1098,7 @@ test "rows replace control bytes in stored commands" {
     defer arena.deinit();
 
     var f: std.ArrayList(u8) = .empty;
-    try appendEntry(arena.allocator(), &f, .{ .command = "ls\x1b[31mred", .timestamp = 40 }, 100, false, 80);
+    _ = try appendEntry(arena.allocator(), &f, .{ .command = "ls\x1b[31mred", .timestamp = 40 }, 100, false, 80);
     try std.testing.expect(std.mem.indexOf(u8, f.items, "ls?[31mred") != null);
 }
 
@@ -1077,12 +1112,12 @@ test "the failed entry is flat red, no whetuu star, unlike a stored row" {
     const red = try a.dupe(u8, style.sgrEscape(&buf, .{ .color = .red }));
 
     var failed: std.ArrayList(u8) = .empty;
-    try appendEntry(a, &failed, .{ .command = "gti status", .timestamp = 40, .failed = true }, 100, false, 80);
+    _ = try appendEntry(a, &failed, .{ .command = "gti status", .timestamp = 40, .failed = true }, 100, false, 80);
     try std.testing.expect(std.mem.indexOf(u8, failed.items, red) != null);
     try std.testing.expect(std.mem.indexOf(u8, failed.items, star) == null);
 
     var stored: std.ArrayList(u8) = .empty;
-    try appendEntry(a, &stored, .{ .command = "git status", .timestamp = 40 }, 100, false, 80);
+    _ = try appendEntry(a, &stored, .{ .command = "git status", .timestamp = 40 }, 100, false, 80);
     try std.testing.expect(std.mem.indexOf(u8, stored.items, red) == null);
     try std.testing.expect(std.mem.indexOf(u8, stored.items, star) == null);
 }
@@ -1093,7 +1128,7 @@ test "the selected failed entry gets a red bar, not the purple one" {
 
     const a = arena.allocator();
     var failed: std.ArrayList(u8) = .empty;
-    try appendEntry(a, &failed, .{ .command = "gti status", .timestamp = 40, .failed = true }, 100, true, 80);
+    _ = try appendEntry(a, &failed, .{ .command = "gti status", .timestamp = 40, .failed = true }, 100, true, 80);
     try std.testing.expect(std.mem.indexOf(u8, failed.items, sgr.bg_red) != null);
     try std.testing.expect(std.mem.indexOf(u8, failed.items, sgr.bg_purple) == null);
 }
@@ -1104,7 +1139,7 @@ test "a highlighted row still stops at the terminal width" {
 
     var f: std.ArrayList(u8) = .empty;
     const long = "echo 'aaaaaaaaaaaaaaaaaaaa' | grep --color bbbbbbbbbbbbbbbbbbbb";
-    try appendEntry(arena.allocator(), &f, .{ .command = long, .timestamp = 40 }, 100, true, 20);
+    _ = try appendEntry(arena.allocator(), &f, .{ .command = long, .timestamp = 40 }, 100, true, 20);
     try std.testing.expectEqual(@as(usize, 20), visibleWidth(f.items));
 }
 
