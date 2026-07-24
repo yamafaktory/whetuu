@@ -3,12 +3,14 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
-## Unreleased
+## v0.1.6 — 2026-07-24
 
 ### Changed
 
 - Install to ~/.local/bin, the path the XDG spec names
 - Call it a status line instead of a prompt
+- Generate the changelog from the commit history
+- Publish hand-written notes with a release that needs them
 
 ### Fixed
 
