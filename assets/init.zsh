@@ -36,7 +36,7 @@ __whetuu_precmd() {
         fi
         __whetuu_cmd=""
     fi
-    PROMPT="$(whetuu prompt --shell zsh --status $exit --duration-ms $dur_ms --width $COLUMNS)"
+    PROMPT="$(whetuu render --shell zsh --status $exit --duration-ms $dur_ms --width $COLUMNS)"
 }
 
 add-zsh-hook preexec __whetuu_preexec

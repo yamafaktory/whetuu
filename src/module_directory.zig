@@ -17,7 +17,7 @@ const default_budget: usize = 40;
 const min_budget: usize = 20;
 
 /// Renders the directory segment. Returns null only if allocation fails, since
-/// a prompt should never abort over the directory.
+/// a status line should never abort over the directory.
 pub fn run(io: std.Io, arena: Allocator, env: *const Env) ?[]const Span {
     _ = io;
     const text = format(arena, env.cwd, env.home, budgetForWidth(env.width)) catch return null;

@@ -118,8 +118,8 @@ const langs = [_]Lang{
     .{ .name = "docker", .icon = "\u{e7b0}", .color = .{ .r = 36, .g = 150, .b = 237 }, .markers = &.{ "Dockerfile", "docker-compose.yml", "compose.yaml" }, .argv = &.{ "docker", "--version" } },
 };
 
-/// What one prompt render needs from this module: the segment spans plus the
-/// detected language itself, so the prompt character can reuse the detection
+/// What one render needs from this module: the segment spans plus the
+/// detected language itself, so the character module can reuse the detection
 /// instead of scanning the directory tree a second time.
 pub const Result = struct {
     lang: ?Lang = null,
@@ -239,7 +239,7 @@ fn probeAnyVersion(io: Io, arena: Allocator, lang: Lang) ?[]const u8 {
 /// The toolchain version, from the cache when its executable is unchanged since
 /// the entry was written, otherwise probed and recorded. Spawning a process is
 /// by far the most expensive thing a render does, so this is the difference
-/// between a ~9 ms and a ~3 ms prompt in a typical project.
+/// between a ~9 ms and a ~3 ms render in a typical project.
 ///
 /// Falls back to a plain probe whenever the cache cannot be used — no `$PATH`
 /// to resolve against, nowhere to write, or a toolchain with a fallback command

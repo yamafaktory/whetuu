@@ -26,7 +26,7 @@ const time_ago = @import("time_ago.zig");
 /// needs no shell wrapping.
 const sgr = style.sgr;
 
-/// whetuu's emblem, shown as the search prompt.
+/// whetuu's emblem, shown beside the search field.
 const star = style.icon.star;
 
 /// Fixed width of the relative-time column, sized for the longest label
@@ -256,7 +256,7 @@ fn matching(arena: Allocator, items: []const Entry, query: []const u8) ![]const 
 }
 
 /// Builds the bar shown at the top of the screen — both scopes with the
-/// active one highlighted in the prompt's purple, the inactive one and the
+/// active one highlighted in the status line's purple, the inactive one and the
 /// separator dimmed: `~/dev/whetuu | all` (toggled with Ctrl+G). Null when
 /// `cwd` is empty, since there is then nothing to toggle.
 fn scopeBar(arena: Allocator, scope: Scope, cwd: []const u8, home: []const u8, max: usize) Allocator.Error!?ScopeBar {
@@ -570,7 +570,7 @@ const Frame = struct {
 /// purple and switches to the tints legible on it. The time column is muted on
 /// every row, selected or not, so only the command stands out. The ephemeral
 /// just-failed entry carries a red star between the time column and the
-/// command, the same emblem the prompt reddens after a failure.
+/// command, the same emblem the status line reddens after a failure.
 fn appendEntry(arena: Allocator, f: *std.ArrayList(u8), entry: Entry, now: i64, selected: bool, cols: usize) !void {
     var buf: [24]u8 = undefined;
     const when = time_ago.relative(&buf, now, entry.timestamp);

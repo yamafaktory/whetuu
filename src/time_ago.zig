@@ -1,5 +1,5 @@
-//! Human "time ago" formatting in atuin's compact style: only the most
-//! significant unit, no suffix — "8m", "5d", "3mo". Relative durations are
+//! Human "time ago" formatting, compact: only the most significant unit, no
+//! suffix — "8m", "5d", "3mo". Relative durations are
 //! pure elapsed-seconds arithmetic — no calendar or timezone — so this needs
 //! no datetime library. Months and years use fixed 30- and 365-day
 //! approximations, which is plenty for a history label.

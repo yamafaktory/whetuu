@@ -1,6 +1,6 @@
 //! whetuu entry point. Four subcommands:
 //!   whetuu init <fish|bash|zsh>   — print the shell integration script
-//!   whetuu prompt [flags]         — render the prompt (called by the shell)
+//!   whetuu render [flags]         — render the status line (called by the shell)
 //!   whetuu history [add ...]      — open the history picker, or record a command
 //!   whetuu paths                  — print where the history and cache live
 //! plus `whetuu --version`.
@@ -41,8 +41,8 @@ pub fn main(init: std.process.Init) !void {
         return init_scripts.write(io, args[2]);
     }
 
-    if (std.mem.eql(u8, sub, "prompt")) {
-        return runPrompt(io, arena, init.environ_map, args[2..]);
+    if (std.mem.eql(u8, sub, "render")) {
+        return runRender(io, arena, init.environ_map, args[2..]);
     }
 
     if (std.mem.eql(u8, sub, "history")) {
@@ -97,8 +97,8 @@ fn writePath(io: Io, w: *std.Io.Writer, label: []const u8, path: ?[]const u8) !v
 }
 
 /// Builds the `Env` from flags and environment, then renders to stdout.
-fn runPrompt(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: []const [:0]const u8) !void {
-    const opts = try cli.parsePrompt(args);
+fn runRender(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: []const [:0]const u8) !void {
+    const opts = try cli.parseRender(args);
 
     var cwd_buf: [max_path_bytes]u8 = undefined;
     const cwd_len = std.process.currentPath(io, &cwd_buf) catch 0;
@@ -192,8 +192,8 @@ fn unixNow(io: Io) i64 {
 
 /// Prints the vertical, colorized help to stderr: the star emblem and command
 /// names in the whetuu brand purple, descriptions dimmed, one entry per line.
-/// The wordmark is deliberately absent — the prompt right above the output
-/// already shows it — and so are the flags of `prompt` and `history add`,
+/// The wordmark is deliberately absent — the status line right above the
+/// output already shows it — and so are the flags of `render` and `history add`,
 /// which only the shell init scripts ever pass.
 fn usage(io: Io) !void {
     const bold = style.sgr.bold;
@@ -203,11 +203,11 @@ fn usage(io: Io) !void {
 
     const text =
         purple ++ style.icon.star ++ reset ++ " " ++
-        dim ++ "opinionated, zero-config, async cross-shell prompt" ++ reset ++ "\n" ++
+        dim ++ "opinionated, zero-config, async status line and history picker" ++ reset ++ "\n" ++
         "\n" ++
         bold ++ "Commands" ++ reset ++ "\n" ++
         "  " ++ purple ++ "init" ++ reset ++ " <fish|bash|zsh>   " ++ dim ++ "Print the shell integration script" ++ reset ++ "\n" ++
-        "  " ++ purple ++ "prompt" ++ reset ++ "                 " ++ dim ++ "Render the prompt (called by the shell)" ++ reset ++ "\n" ++
+        "  " ++ purple ++ "render" ++ reset ++ "                 " ++ dim ++ "Render the status line (called by the shell)" ++ reset ++ "\n" ++
         "  " ++ purple ++ "history" ++ reset ++ "                " ++ dim ++ "Open the interactive history picker" ++ reset ++ "\n" ++
         "  " ++ purple ++ "history add" ++ reset ++ "            " ++ dim ++ "Record a finished command (status 0 only)" ++ reset ++ "\n" ++
         "  " ++ purple ++ "paths" ++ reset ++ "                  " ++ dim ++ "Print where the history and cache live" ++ reset ++ "\n" ++

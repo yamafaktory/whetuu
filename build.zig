@@ -1,7 +1,7 @@
 const std = @import("std");
 
 /// Targets published by `zig build release`. Shells limit this to unix: the
-/// prompt only integrates with fish, bash and zsh.
+/// status line only integrates with fish, bash and zsh.
 const release_targets = [_][]const u8{
     "x86_64-linux-musl",
     "aarch64-linux-musl",
@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) void {
     }
 
     // Re-records the README's demo. Depends on the installed binary so it always
-    // captures the current prompt rather than a stale zig-out.
+    // captures the current status line rather than a stale zig-out.
     const demo_step = b.step("demo", "Re-record docs/demo.cast and render docs/demo.gif");
     const demo = b.addSystemCommand(&.{"bash"});
     demo.addFileArg(b.path("tools/demo.sh"));

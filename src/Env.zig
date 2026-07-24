@@ -1,4 +1,4 @@
-//! Immutable snapshot of shell state for a single prompt render. Built once in
+//! Immutable snapshot of shell state for a single render. Built once in
 //! `main` from CLI flags plus the environment, then shared (read-only) with
 //! every module running concurrently. Modules must not mutate it: it is shared
 //! across threads.
@@ -27,8 +27,8 @@ duration_ms: u64,
 /// Exit status of the previous command (0 = success).
 exit_status: u8,
 
-/// Which shell requested the prompt. Selects how non-printing escape sequences
-/// are wrapped so the line editor counts prompt width correctly (see `style`).
+/// Which shell requested the render. Selects how non-printing escape sequences
+/// are wrapped so the line editor counts the width correctly (see `style`).
 pub const Shell = enum {
     bash,
     fish,

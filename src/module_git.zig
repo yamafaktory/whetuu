@@ -2,7 +2,7 @@
 //! the branch and the working-tree status, which are rendered as adjacent spans
 //! (magenta branch, then an in-progress operation like `(rebasing 2/7)`, then a
 //! colored status group). The call is bounded by a short timeout so a slow or
-//! huge repository can never stall the prompt. The operation state and the
+//! huge repository can never stall the status line. The operation state and the
 //! stash count are read straight from the `.git` directory — no extra
 //! subprocess.
 

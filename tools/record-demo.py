@@ -136,7 +136,7 @@ def main():
         drain(settle)
 
     try:
-        drain(1.6)                              # first prompt
+        drain(1.6)                              # first status line
         line("git status --short", 1.4)
         drain(0.6)
         line("git switch -q -c feature/demo", 1.4)

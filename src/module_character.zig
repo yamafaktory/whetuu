@@ -1,4 +1,4 @@
-//! Prompt character module: the glyph the user types after, on its own line.
+//! Character module: the glyph the user types after, on its own line.
 //! Always a star; purple by default, tinted to the detected language's brand
 //! color inside a recognized project. Either way it is forced to theme red
 //! after a failed command so the error signal is never lost.

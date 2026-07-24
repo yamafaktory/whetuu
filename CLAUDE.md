@@ -1,10 +1,11 @@
 # whetū
 
-An opinionated, zero-config, async cross-shell prompt (fish/bash/zsh) in Zig 0.17.
+An opinionated, zero-config, async status line and history picker
+(fish/bash/zsh) in Zig 0.17.
 The binary is installed as the ASCII command `whetuu` (whetū is Māori for "star").
 
-The prompt format and module set are hardcoded — there is intentionally no config
-file. A single compiled binary renders the whole prompt by running every module
+The status line format and module set are hardcoded — there is intentionally no
+config file. A single compiled binary renders the whole line by running every module
 concurrently via `std.Io` (`Io.async` → `Future`, backed by `Io.Threaded`).
 
 ## Working approach
@@ -123,9 +124,14 @@ by someone deciding whether to use whetuu, so it has to be plain.
   "cross-shell", "type check" rather than "type-check". This does not apply to
   code, flags, file names or target triples (`--duration-ms`,
   `x86_64-linux-musl`, `zig-out`).
-- One exception: the README's opening line, *"An opinionated, zero-config
-  cross-shell prompt written in Zig"*. It is the project's tagline and reads
-  better as it is. Leave it alone.
+- One exception: the README's opening line, *"An opinionated, zero-config status
+  line and history picker for fish, bash and zsh, written in Zig"*. It is the
+  project's tagline. It names both halves on purpose, because naming only the
+  first hides that whetuu takes the up arrow. Leave it alone.
+- **Never call what whetuu renders a "prompt".** It is a status line. A prompt is
+  what a shell draws and owns, and whetuu also takes the up arrow, so the word
+  oversells what it leaves alone. The word is fine in its unrelated sense, as in
+  a password prompt or a Gatekeeper prompt.
 - Prefer a full stop to a dash when joining two thoughts.
 - Say the thing, then explain it. Do not build up to the point.
 
@@ -135,14 +141,14 @@ by someone deciding whether to use whetuu, so it has to be plain.
 - `zig build --release=fast` — optimized build installed to `zig-out/bin/whetuu`,
   for trying a change locally. Run after every change (see above)
 - `zig build check` — type-check without producing an artifact
-- `zig build run -- <args>` — compile and run (e.g. `-- prompt --shell fish --status 0`)
+- `zig build run -- <args>` — compile and run (e.g. `-- render --shell fish --status 0`)
 - `zig build release` — cross-compile + package a tarball per target into
   `zig-out/release/`; `-Dversion=vX.Y.Z` stamps `whetuu --version`
 - `zig build og` — render `docs/og.png`, the social card, from `tools/og.html`.
   Run it when the wordmark, palette or tagline changes, or the card starts
   disagreeing with the page it previews
 - `zig build demo` — re-record `docs/demo.cast` and render the README's
-  `docs/demo.gif` (see `RELEASING.md`); run it whenever the prompt or picker
+  `docs/demo.gif` (see `RELEASING.md`); run it whenever the status line or picker
   changes visibly
 - `zig build bump -- vX.Y.Z` — set `.version` in `build.zig.zon` and nothing else
 - `zig build publish -- vX.Y.Z` — cut a release end to end: bump, commit, push

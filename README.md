@@ -4,9 +4,21 @@
 [![version](https://img.shields.io/github/v/release/yamafaktory/whetuu?sort=semver&display_name=tag&label=version)](https://github.com/yamafaktory/whetuu/releases/latest)
 [![license](https://img.shields.io/github/license/yamafaktory/whetuu)](LICENSE)
 
-An opinionated, zero-config cross-shell prompt written in Zig.
+An opinionated, zero-config status line and history picker for fish, bash and
+zsh, written in Zig.
 
-*whetū* is Māori for "star". A star is the default prompt character, using the
+Two things, not one. whetuu draws the status line above your cursor, and it puts
+your history on the up arrow.
+
+Both live in one binary, so the picker knows where you are. The up arrow opens
+on what you ran in this directory, and Ctrl+G switches to all of it. Failed
+commands are never stored, so you do not scroll past your own typos.
+
+Your own shell history stays exactly where it is. whetuu never reads or rewrites
+it, and keeps its own store alongside. See [History](#history) for what the
+picker does and where it keeps things.
+
+*whetū* is Māori for "star". A star is the character you type after, using the
 Nerd Font glyph `nf-md-star_face`. The binary is installed as `whetuu`.
 
 Pronounced **feh-TOO** (`/fɛˈtuː/`). In Māori `wh` is an *f* sound, not a *w*.
@@ -14,17 +26,19 @@ The macron in `ū` makes that vowel long, and a long vowel takes the stress, so
 it falls on the second syllable. The ASCII name doubles the `u` to write that
 same long vowel.
 
-There is nothing to configure. One compiled binary renders one curated prompt,
-the same for everyone. Every module that reads the disk runs at the same time
-via `std.Io`, so a render costs about what its slowest probe costs. See
+There is nothing to configure. One compiled binary renders one curated status
+line, the same for everyone. Every module that reads the disk runs at the same
+time via `std.Io`, so a render costs about what its slowest probe costs. See
 [Performance](#performance).
 
-> **Requires a [Nerd Font](https://www.nerdfonts.com/).** The prompt uses Nerd
-> Font glyphs for the git branch, language logos, and the prompt character.
-> Without one those glyphs show as tofu boxes.
+> **Needs a [Nerd Font](https://www.nerdfonts.com/).** whetuu draws the git
+> branch, the language logos and the star with Nerd Font glyphs.
+> Most terminal setups already run one, so try whetuu first. If the star and the
+> branch glyph come out as empty boxes, switch your terminal font and they will
+> be there.
 
-![A terminal session. The prompt tracks the branch, git status and toolchain
-version. The history picker then filters and runs a command](docs/demo.gif)
+![A terminal session. The status line tracks the branch, git status and
+toolchain version. The history picker then filters and runs a command](docs/demo.gif)
 
 [Website](https://yamafaktory.github.io/whetuu/) · [Install](#install) ·
 [Performance](#performance) · [Security](#security)
@@ -46,10 +60,10 @@ Left to right, each shown only when relevant:
 
 ## Performance
 
-A prompt runs before every command, so you pay its cost constantly. Numbers from
-`hyperfine --warmup 40 --runs 400` on a 13th gen i9-13900H, ReleaseFast build,
-with the toolchain version cache warm, pinned to the performance cores on an
-otherwise idle machine:
+A status line runs before every command, so you pay its cost constantly.
+Numbers from `hyperfine --warmup 40 --runs 400` on a 13th gen i9-13900H,
+ReleaseFast build, with the toolchain version cache warm, pinned to the
+performance cores on an otherwise idle machine:
 
 | Directory | Render | For comparison |
 |---|---|---|
@@ -59,10 +73,10 @@ otherwise idle machine:
 
 Two things do most of the work. The probes overlap, so a render costs about what
 the slowest one costs rather than the sum of all of them. In the monorepo the
-whole prompt takes about as long as `git status` on its own.
+whole status line takes about as long as `git status` on its own.
 
 Toolchain versions are also cached, keyed on the binary path, mtime and size.
-The first prompt in a project pays for the probe. Later ones read a small file
+The first render in a project pays for the probe. Later ones read a small file
 instead. Upgrading a toolchain changes its mtime, which drops the stale entry.
 What that saves depends on the toolchain. A slow `--version` call is well worth
 skipping. A fast one is already hidden behind the git probe running alongside
@@ -72,7 +86,7 @@ Reproduce it with:
 
 ```sh
 hyperfine --warmup 40 --runs 400 \
-  'whetuu prompt --shell fish --status 0 --duration-ms 0 --width 100'
+  'whetuu render --shell fish --status 0 --duration-ms 0 --width 100'
 ```
 
 Pin the run on a laptop that mixes performance and efficiency cores, with
@@ -82,8 +96,8 @@ measurement spreads across a factor of two and tells you nothing.
 **A slow repository cannot hang your shell.** Both subprocesses are bounded. The
 `git` call gets 250 ms and the toolchain probe gets 200 ms. They run at the same
 time, so the worst case is the larger of the two, not the sum. Given a `git`
-that hangs for 30 s, the prompt still returns in 257 ms. It simply drops the git
-segment.
+that hangs for 30 s, the status line still returns in 257 ms. It simply drops
+the git segment.
 
 In a large repository, almost all of that time is `git status`, and most of that
 is the scan for untracked files. Speeding it up is git's job, not whetuu's.
@@ -267,8 +281,8 @@ eval "$(whetuu init zsh)"
 ```
 
 `whetuu init <shell>` prints the integration script. The shell hook then calls
-`whetuu prompt …` on every prompt, passing the last exit status, the command
-duration, and the terminal width.
+`whetuu render …` before every command, passing the last exit status, the
+command duration, and the terminal width.
 
 Run `whetuu init <shell>` by hand and it prints the line above instead, with the
 file it belongs in. Several hundred lines of shell answer nothing when you are
@@ -285,12 +299,12 @@ history picker is on the up arrow. The full command surface:
 | `whetuu` | Print the command list |
 | `whetuu --version` | Print the version |
 | `whetuu init <fish\|bash\|zsh>` | Print the shell integration script, meant to be `source`d or `eval`ed. Prints the setup line instead when run straight into a terminal |
-| `whetuu prompt` | Render one prompt. Called by the shell hook, not by you |
+| `whetuu render` | Render one status line. Called by the shell hook, not by you |
 | `whetuu history` | Open the interactive history picker |
 | `whetuu history add -- <command>` | Record a finished command. Called by the shell hook |
 | `whetuu paths` | Print where the history store and version cache live, and whether each file exists yet |
 
-`prompt` and `history add` take flags that only the init scripts pass, namely
+`render` and `history add` take flags that only the init scripts pass, namely
 exit status, duration and width. That is why they are left out here.
 
 `whetuu paths` marks a file that is not there yet rather than hiding it. A fresh
@@ -304,6 +318,16 @@ whetuu keeps its own command history. It is one file, shared by all three
 shells, at `~/.local/share/whetuu/history`. It moves under `$XDG_DATA_HOME` when
 that variable is set. macOS uses the same path rather than `~/Library`, so the
 store stays put when you share a dotfiles setup across machines.
+
+Your shell's own history file is untouched. whetuu never reads, writes or
+truncates `~/.bash_history`, `~/.zsh_history` or fish's database. The two stores
+run side by side. Delete the whetuu store and your shell history is exactly as
+it was.
+
+Two things it does take. The up arrow, which all three integrations bind to the
+picker. And on bash only, `ignorespace` is added to your `HISTCONTROL`, keeping
+whatever value you already had, so a space prefixed command stays out of both
+stores. `Ctrl+R` and everything else your shell gives you keep working.
 
 A command is recorded once it finishes, and only when it exited with status 0.
 Typos and failed runs never enter the store. Prefix a command with a space to
@@ -336,7 +360,7 @@ The picker behaves the same in all three shells.
 The list grows upward from the bottom. The most recent command sits just above
 the search line and older ones climb from there. Each row is prefixed with how
 long ago it ran, like `5m`, `2h` or `3d`. The selected row is highlighted across
-the full width in the prompt's star purple.
+the full width in the star purple of the status line.
 
 Commands are syntax highlighted. The program name, flags, paths, variables,
 quoted strings and operators each get their own color, so a long row reads at a

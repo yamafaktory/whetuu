@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>whetū — an opinionated, zero-config cross-shell prompt written in Zig</title>
-<meta name="description" content="A single compiled binary that renders one curated prompt for fish, bash and zsh. Every module runs at once via std.Io, so a render costs about what its slowest probe costs.">
+<title>whetū — an opinionated, zero-config status line and history picker written in Zig</title>
+<meta name="description" content="A single compiled binary that renders one curated status line for fish, bash and zsh, and binds the up arrow to its own history picker. Every module runs at once via std.Io, so a render costs about what its slowest probe costs.">
 <link rel="canonical" href="https://yamafaktory.github.io/whetuu/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://yamafaktory.github.io/whetuu/">
-<meta property="og:title" content="whetū — a zero-config cross-shell prompt in Zig">
+<meta property="og:title" content="whetū — a zero-config status line and history picker in Zig">
 <meta property="og:description" content="One binary, no config file. Git state, 39 toolchains and a syntax-highlighted history picker, in about 2 ms.">
 <meta property="og:image" content="https://yamafaktory.github.io/whetuu/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="whetū — a zero-config cross-shell prompt in Zig">
+<meta name="twitter:title" content="whetū — a zero-config status line and history picker in Zig">
 <meta name="twitter:description" content="One binary, no config file. Git state, 39 toolchains and a syntax-highlighted history picker, in about 2 ms.">
 <meta name="twitter:image" content="https://yamafaktory.github.io/whetuu/og.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%AD%90%3C/text%3E%3C/svg%3E">
@@ -22,7 +22,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
 <style>
-/* Four Nerd Font glyphs the prompt actually uses, subsetted out of Meslo LG S
+/* Four Nerd Font glyphs the status line actually uses, subsetted out of Meslo LG S
    Nerd Font Mono (Apache 2.0, see glyphs.LICENSE.txt) — 968 bytes. Nerd Fonts
    are not on Google Fonts: they are patched builds of upstream families, so
    the icon glyphs only ship from the Nerd Fonts project itself. The
@@ -466,8 +466,9 @@ footer p { margin: 0 0 0.4rem; }
 <header class="hero wrap" id="top">
   <h1 class="wordmark"><span class="mark" aria-hidden="true">󰦥</span>whetū</h1>
   <p class="say">/fɛˈtuː/ &nbsp;·&nbsp; feh-TOO &nbsp;·&nbsp; Māori for “star”</p>
-  <p class="lede">An opinionated, zero-config cross-shell prompt written in Zig.</p>
-  <p class="sub">One compiled binary renders one curated prompt, the same for everyone. There is no config file, nothing to theme and nothing to tune. It runs on fish, bash and zsh, and renders in about two milliseconds.</p>
+  <p class="lede">An opinionated, zero-config status line and history picker for fish, bash and zsh, written in Zig.</p>
+  <p class="sub">One compiled binary renders one curated status line, the same for everyone. There is no config file, nothing to theme and nothing to tune, and it renders in about two milliseconds.</p>
+  <p class="sub">It also puts your history on the up arrow. One binary does both, so the picker knows where you are. It opens on what you ran in this directory, and Ctrl+G switches to all of it. Failed commands are never stored, so you do not scroll past your own typos. Your own shell history stays exactly where it is.</p>
 
   <div class="term">
     <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="term-title">~/dev/whetuu</span></div>
@@ -505,7 +506,7 @@ footer p { margin: 0 0 0.4rem; }
   <p>Then open a new shell. That is the whole install.</p>
   <p class="note">Would rather edit your own dotfiles? Run it with <code>WHETUU_NO_MODIFY=1</code> and it prints the lines instead of writing them. <code>whetuu init &lt;shell&gt;</code> prints them too, along with the file they belong in. A <code>PATH</code> line appears only when <code>~/.local/bin</code> is not already on your <code>PATH</code>.</p>
 
-  <p class="note"><b>You need a <a href="https://www.nerdfonts.com/">Nerd Font</a>.</b> The prompt uses Nerd Font glyphs for the git branch, the language logos and the prompt character. Without one, those show as empty boxes.</p>
+  <p class="note"><b>Needs a <a href="https://www.nerdfonts.com/">Nerd Font</a>.</b> whetuu draws the git branch, the language logos and the star with Nerd Font glyphs. Most terminal setups already run one, so try it first. If the star and the branch glyph come out as empty boxes, switch your terminal font.</p>
 
   <h3>Uninstalling</h3>
   <p>One line for the program, one for the data. The history store and the version cache live under the XDG directories rather than next to the binary, so removing whetuu never takes your history with it. Run <code>whetuu paths</code> first if you want to see both locations, in case <code>$XDG_DATA_HOME</code> or <code>$XDG_CACHE_HOME</code> moves them on your machine.</p>
@@ -518,10 +519,10 @@ footer p { margin: 0 0 0.4rem; }
 <section class="wrap" id="demo">
   <p class="eyebrow">~/demo</p>
   <h2>See it in a real shell</h2>
-  <p>The prompt tracks the branch, the git status and the toolchain version. Pressing the up arrow opens the history picker, which filters as you type and runs what you pick.</p>
+  <p>The status line tracks the branch, the git status and the toolchain version. Pressing the up arrow opens the history picker, which filters as you type and runs what you pick.</p>
   <div class="term term-flush">
     <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="term-title">demo</span></div>
-    <div class="term-body"><img src="demo.gif" width="905" height="560" alt="A terminal session. The prompt tracks the branch, git status and toolchain version. The history picker then filters and runs a command."></div>
+    <div class="term-body"><img src="demo.gif" width="905" height="560" alt="A terminal session. The status line tracks the branch, git status and toolchain version. The history picker then filters and runs a command."></div>
   </div>
 </section>
 <section class="wrap" id="modules">
@@ -576,20 +577,20 @@ footer p { margin: 0 0 0.4rem; }
         <tr><td class="first"><code>whetuu</code></td><td class="desc">Print the command list.</td></tr>
         <tr><td class="first"><code>whetuu --version</code></td><td class="desc">Print the version.</td></tr>
         <tr><td class="first"><code>whetuu init &lt;fish|bash|zsh&gt;</code></td><td class="desc">Print the shell integration script, meant to be <code>source</code>d or <code>eval</code>ed. Prints the setup line instead when run straight into a terminal.</td></tr>
-        <tr><td class="first"><code>whetuu prompt</code></td><td class="desc">Render one prompt. Called by the shell hook, not by you.</td></tr>
+        <tr><td class="first"><code>whetuu render</code></td><td class="desc">Render one status line. Called by the shell hook, not by you.</td></tr>
         <tr><td class="first"><code>whetuu history</code></td><td class="desc">Open the interactive history picker.</td></tr>
         <tr><td class="first"><code>whetuu history add -- &lt;command&gt;</code></td><td class="desc">Record a finished command. Called by the shell hook.</td></tr>
         <tr><td class="first"><code>whetuu paths</code></td><td class="desc">Print where the history store and version cache live, and whether each file exists yet.</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="note"><code>prompt</code> and <code>history add</code> take flags that only the init scripts pass, namely exit status, duration and width. That is why they are left out here.</p>
+  <p class="note"><code>render</code> and <code>history add</code> take flags that only the init scripts pass, namely exit status, duration and width. That is why they are left out here.</p>
   <p class="note"><b>A fresh install has neither file.</b> <code>whetuu paths</code> marks the missing one rather than hiding it, until the first command is recorded and the first toolchain version is cached. With neither <b>$HOME</b> nor the matching XDG variable set it says so, because then whetuu has nowhere to write.</p>
 </section>
 <section class="wrap" id="performance">
   <p class="eyebrow">~/performance</p>
   <h2>Renders in about 2 ms</h2>
-  <p>A prompt runs before every command, which makes it the one thing in your shell that has to be quick. Every module that reads the disk runs at the same time via <code>std.Io</code>, so a render takes about as long as its slowest probe rather than the sum of them all.</p>
+  <p>A status line runs before every command, which makes it the one thing in your shell that has to be quick. Every module that reads the disk runs at the same time via <code>std.Io</code>, so a render takes about as long as its slowest probe rather than the sum of them all.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Directory</th><th>Render</th><th>For comparison</th></tr></thead>
@@ -600,13 +601,13 @@ footer p { margin: 0 0 0.4rem; }
       </tbody>
     </table>
   </div>
-  <p class="note">Measured with <code>hyperfine --warmup 40 --runs 400</code> on a 13th gen i9-13900H, ReleaseFast, pinned to the performance cores on an otherwise idle machine. In the monorepo the whole prompt takes about as long as <code>git status</code> on its own.</p>
-  <p class="note"><b>A slow repository cannot hang your shell.</b> Both subprocesses are bounded. Git gets 250 ms and the toolchain probe gets 200 ms, and they run at the same time, so the worst case is the larger of the two. Given a git that hangs for 30 seconds, the prompt still returns in 257 ms. It simply drops the git segment.</p>
+  <p class="note">Measured with <code>hyperfine --warmup 40 --runs 400</code> on a 13th gen i9-13900H, ReleaseFast, pinned to the performance cores on an otherwise idle machine. In the monorepo the whole status line takes about as long as <code>git status</code> on its own.</p>
+  <p class="note"><b>A slow repository cannot hang your shell.</b> Both subprocesses are bounded. Git gets 250 ms and the toolchain probe gets 200 ms, and they run at the same time, so the worst case is the larger of the two. Given a git that hangs for 30 seconds, the status line still returns in 257 ms. It simply drops the git segment.</p>
 </section>
 <section class="wrap" id="security">
   <p class="eyebrow">~/security</p>
   <h2>Nothing leaves your machine</h2>
-  <p>A prompt sees every command you run, and the picker keeps them. That is a lot to hand a small tool, so here is exactly what whetuu does and does not do.</p>
+  <p>A status line sees every command you run, and the picker keeps them. That is a lot to hand a small tool, so here is exactly what whetuu does and does not do.</p>
   <dl class="mods">
     <div class="mod"><dt>No network</dt><dd>There is no socket, no HTTP client and no sync anywhere in the binary. No telemetry and no update check. There is no account and no server to opt out of.</dd></div>
     <div class="mod"><dt>Two files</dt><dd>Running, whetuu writes exactly two. The history store, created with mode <b>600</b> and reset to it on every write, so one left readable by an older version corrects itself. And a cache of toolchain version strings at <b>~/.cache/whetuu/versions</b>, which holds nothing else and can be deleted whenever you like.</dd></div>

@@ -1,4 +1,4 @@
-//! Memoises toolchain version strings across prompts.
+//! Memoises toolchain version strings across renders.
 //!
 //! Probing a toolchain costs a `fork`+`exec` — around 6 ms of a 9 ms render on
 //! a warm machine — to read a string that changes when you upgrade and at no
@@ -76,7 +76,7 @@ pub fn get(io: Io, arena: Allocator, cache_path: []const u8, name: []const u8, k
 }
 
 /// Records `version` for `name`, replacing any previous entry. Written to a
-/// temporary file and renamed, so a prompt reading the cache never observes a
+/// temporary file and renamed, so a render reading the cache never observes a
 /// half-written file — several shells may render at once.
 pub fn put(
     io: Io,

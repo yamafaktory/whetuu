@@ -103,7 +103,7 @@ instructions, or the site will describe a binary nobody can get yet.
 ## Regenerating the demo
 
 `docs/demo.gif` in the README is rendered from `docs/demo.cast`. Whenever the
-prompt or the picker changes visibly, re-record both:
+status line or the picker changes visibly, re-record both:
 
 ```sh
 zig build demo

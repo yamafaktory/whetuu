@@ -1,6 +1,6 @@
 //! Async render orchestrator. Spawns every segment module concurrently via
 //! `Io.async`, then awaits them in display order so the output is deterministic
-//! even though the work overlaps. The prompt character is pure and is rendered
+//! even though the work overlaps. The character is pure and is rendered
 //! synchronously after the segment line.
 
 const std = @import("std");
@@ -22,10 +22,10 @@ const user_host = @import("module_user_host.zig");
 /// breathes between the colored segments on either side.
 const separator: Span = .{ .style = .{ .color = .bright_black }, .text = " · " };
 
-/// Renders the full prompt to `w`. All modules are spawned before any is
+/// Renders the full status line to `w`. All modules are spawned before any is
 /// awaited, so their I/O overlaps; awaiting in display order keeps layout
 /// stable. The language module runs detection exactly once — its result also
-/// tints the prompt character, which is pure and rendered synchronously after
+/// tints the character, which is pure and rendered synchronously after
 /// the segment line.
 pub fn render(io: Io, arena: Allocator, env: *const Env, w: *Writer) Writer.Error!void {
     var git_future = io.async(git.run, .{ io, arena, env });

@@ -1,5 +1,5 @@
 //! user@host module. Shown only when it carries information: over SSH (so a
-//! remote prompt is unmistakable) or when running as root (then in red, as a
+//! remote session is unmistakable) or when running as root (then in red, as a
 //! warning). On a local, non-root shell it renders nothing — the zero-config
 //! answer to "which box am I on?".
 

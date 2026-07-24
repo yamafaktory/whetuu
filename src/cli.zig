@@ -1,4 +1,4 @@
-//! Minimal flag parsing for the `prompt` and `history add` subcommands. The
+//! Minimal flag parsing for the `render` and `history add` subcommands. The
 //! shell init scripts are the only callers, so the accepted flags are fixed
 //! and few.
 
@@ -23,9 +23,9 @@ pub const HistoryPickArgs = struct {
     last_at: i64 = 0,
 };
 
-/// Values parsed from `whetuu prompt` flags. Fields default to a usable prompt
-/// even when a shell omits a flag.
-pub const PromptArgs = struct {
+/// Values parsed from `whetuu render` flags. Fields default to a usable status
+/// line even when a shell omits a flag.
+pub const RenderArgs = struct {
     shell: Shell = .fish,
     width: u16 = 0,
     duration_ms: u64 = 0,
@@ -105,8 +105,8 @@ pub fn parseHistoryPick(args: []const [:0]const u8) ParseError!HistoryPickArgs {
 /// (which must exclude argv[0] and the subcommand). Unknown numeric values that
 /// overflow are clamped rather than rejected, since a shell can legitimately
 /// report a huge duration.
-pub fn parsePrompt(args: []const [:0]const u8) ParseError!PromptArgs {
-    var result: PromptArgs = .{};
+pub fn parseRender(args: []const [:0]const u8) ParseError!RenderArgs {
+    var result: RenderArgs = .{};
 
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -134,7 +134,7 @@ pub fn parsePrompt(args: []const [:0]const u8) ParseError!PromptArgs {
 
 /// Parses an unsigned integer, saturating to the type maximum on overflow.
 /// Empty strings parse as 0 because shells pass an empty value when a variable
-/// is unset (e.g. bash's first prompt has no recorded duration).
+/// is unset (e.g. bash's first status line has no recorded duration).
 fn parseClamped(comptime T: type, text: []const u8) error{Invalid}!T {
     if (text.len == 0) return 0;
     return std.fmt.parseInt(T, text, 10) catch |err| switch (err) {
@@ -145,7 +145,7 @@ fn parseClamped(comptime T: type, text: []const u8) error{Invalid}!T {
 
 test "parses all flags" {
     const args = [_][:0]const u8{ "--shell", "zsh", "--status", "1", "--duration-ms", "1500", "--width", "120" };
-    const got = try parsePrompt(&args);
+    const got = try parseRender(&args);
     try std.testing.expectEqual(Shell.zsh, got.shell);
     try std.testing.expectEqual(@as(u8, 1), got.exit_status);
     try std.testing.expectEqual(@as(u64, 1500), got.duration_ms);
@@ -154,19 +154,19 @@ test "parses all flags" {
 
 test "empty numeric value is zero" {
     const args = [_][:0]const u8{ "--duration-ms", "" };
-    const got = try parsePrompt(&args);
+    const got = try parseRender(&args);
     try std.testing.expectEqual(@as(u64, 0), got.duration_ms);
 }
 
 test "overflow saturates to max" {
     const args = [_][:0]const u8{ "--status", "99999" };
-    const got = try parsePrompt(&args);
+    const got = try parseRender(&args);
     try std.testing.expectEqual(@as(u8, 255), got.exit_status);
 }
 
 test "unknown shell is rejected" {
     const args = [_][:0]const u8{ "--shell", "tcsh" };
-    try std.testing.expectError(error.UnknownShell, parsePrompt(&args));
+    try std.testing.expectError(error.UnknownShell, parseRender(&args));
 }
 
 test "history add parses status then command words after --" {

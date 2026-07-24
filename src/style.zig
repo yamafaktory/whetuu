@@ -1,7 +1,7 @@
 //! ANSI styling plus the per-shell wrapping of non-printing escape sequences.
 //!
 //! Every shell needs the color escapes marked as zero-width so its line editor
-//! computes the prompt length correctly. Getting this wrong corrupts cursor
+//! computes the status line length correctly. Getting this wrong corrupts cursor
 //! placement and line wrapping, so all wrapping lives here and nowhere else.
 
 const std = @import("std");
@@ -38,7 +38,7 @@ pub const Color = enum {
     }
 };
 
-/// A 24-bit truecolor, used for brand colors and the purple prompt character
+/// A 24-bit truecolor, used for brand colors and the purple character
 /// that the 4-bit palette cannot express.
 pub const Rgb = struct {
     r: u8,
@@ -92,7 +92,7 @@ pub const lavender: Rgb = .{ .r = 216, .g = 180, .b = 254 };
 pub const lavender_sgr = std.fmt.comptimePrint("{d};{d};{d}", .{ lavender.r, lavender.g, lavender.b });
 
 /// Raw SGR escapes for output written straight to a terminal (the picker, the
-/// help screen), where no shell width-wrapping is needed. Prompt segments must
+/// help screen), where no shell width-wrapping is needed. Status line segments must
 /// go through `write` instead.
 pub const sgr = struct {
     pub const bg_purple = "\x1b[48;2;" ++ purple_sgr ++ "m";
@@ -112,7 +112,7 @@ pub const escape_len = "\x1b[1;38;2;255;255;255m".len;
 /// The bare SGR escape for `sty`, written into `buf` and returned as a slice of
 /// it. Unwrapped and never a reset, so consecutive calls recolor text without
 /// disturbing a background already in effect — that is what lets the picker
-/// paint a highlighted row. Prompt segments must go through `write` instead,
+/// paint a highlighted row. Status line segments must go through `write` instead,
 /// which adds the shell's width markers. Every branch fits `escape_len` by
 /// construction, so the writes assert rather than fail.
 pub fn sgrEscape(buf: *[escape_len]u8, sty: Style) []const u8 {
@@ -129,7 +129,7 @@ pub fn sgrEscape(buf: *[escape_len]u8, sty: Style) []const u8 {
 }
 
 /// Writes `text` styled per `style`, with all escape sequences wrapped so the
-/// target shell does not count them toward the prompt width. A `.default`,
+/// target shell does not count them toward the status line width. A `.default`,
 /// non-bold style is written as plain text with no escapes at all.
 pub fn write(w: *Writer, shell: Shell, style: Style, text: []const u8) Writer.Error!void {
     if (style.rgb == null and style.color == .default and !style.bold) {

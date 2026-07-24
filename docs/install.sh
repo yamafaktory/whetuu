@@ -239,4 +239,5 @@ else
     fi
 fi
 
-printf '\nThe prompt needs a Nerd Font: https://www.nerdfonts.com\n'
+printf '\nIf the star and the branch glyph render as boxes, your terminal font is\n'
+printf 'not a Nerd Font. Pick one from https://www.nerdfonts.com\n'

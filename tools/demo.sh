@@ -3,8 +3,8 @@
 # Re-records docs/demo.cast and renders docs/demo.gif, the recording shown in
 # the README. Invoked by `zig build demo`.
 #
-# The GIF has to carry the font: whetuu's prompt is Nerd Font glyphs end to end,
-# and a viewer whose font lacks them sees tofu boxes instead of the prompt.
+# The GIF has to carry the font: whetuu's status line is Nerd Font glyphs end to
+# end, and a viewer whose font lacks them sees tofu boxes instead of the line.
 
 set -euo pipefail
 
