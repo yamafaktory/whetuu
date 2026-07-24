@@ -319,6 +319,11 @@ shells, at `~/.local/share/whetuu/history`. It moves under `$XDG_DATA_HOME` when
 that variable is set. macOS uses the same path rather than `~/Library`, so the
 store stays put when you share a dotfiles setup across machines.
 
+Nothing is ever deleted from it. The picker reads the most recent few megabytes
+rather than the whole file, so it opens just as fast on a store built over years
+as on a fresh one. Everything you have run stays on disk either way, and on a
+store that large the commands past the window are ones you last ran years ago.
+
 Your shell's own history file is untouched. whetuu never reads, writes or
 truncates `~/.bash_history`, `~/.zsh_history` or fish's database. The two stores
 run side by side. Delete the whetuu store and your shell history is exactly as

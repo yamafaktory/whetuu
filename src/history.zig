@@ -6,6 +6,11 @@
 //! command ran in is recorded so the picker can scope the list to it. The read
 //! side deduplicates per (directory, command) — most-recent occurrence wins —
 //! and returns entries newest-first to feed the picker.
+//!
+//! Appends are unbounded; reads are not. A load takes the last `read_budget`
+//! bytes, so opening the picker costs the same on a store of any size. The file
+//! keeps everything ever written either way — the window decides what is
+//! offered, never what is kept.
 
 const std = @import("std");
 
@@ -13,9 +18,13 @@ const Allocator = std.mem.Allocator;
 const Dir = std.Io.Dir;
 const Io = std.Io;
 
-/// Upper bound on how much history is read into memory at once. Far more than a
-/// realistic shell history, so it only ever bounds a corrupt or runaway file.
-const read_limit: Io.Limit = .limited(4 << 20);
+/// How much of the store a load reads, taken from the end. This bounds what an
+/// open costs without bounding what the store keeps: a larger file still holds
+/// every line, and only the oldest stop being offered to the picker. At a
+/// typical line length that is on the order of fifty thousand distinct
+/// commands, which is years of them, and the picker opens in the same few
+/// milliseconds either side of it.
+const read_budget = 4 << 20;
 
 /// A stored command, the directory it ran in (empty when unknown, e.g. a
 /// legacy line), and when it was last run (unix seconds; 0 when unknown).
@@ -76,12 +85,44 @@ pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd:
 /// Reads the history file and returns its unique entries, newest first. A
 /// missing file yields an empty slice, since "no history yet" is not an error.
 pub fn load(io: Io, arena: Allocator, path: []const u8) ![]const Entry {
-    const bytes = Dir.cwd().readFileAlloc(io, path, arena, read_limit) catch |err| switch (err) {
+    var file = Dir.openFileAbsolute(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound => return &.{},
         else => return err,
     };
+    defer file.close(io);
 
-    return dedupe(arena, bytes);
+    const size = file.length(io) catch return &.{};
+    if (size == 0) return &.{};
+
+    // Read from the end, so what a big store loses is its oldest commands
+    // rather than its newest. Under the budget this is the whole file and the
+    // window is exact.
+    const want: usize = @intCast(@min(@as(u64, read_budget), size));
+    const start = size - want;
+
+    const buf = try arena.alloc(u8, want);
+    var reader = file.reader(io, buf);
+    reader.seekTo(start) catch return &.{};
+    const bytes = reader.interface.peek(want) catch return &.{};
+
+    // Starting mid-file lands mid-record, and half a command is worse than no
+    // command. A record can never hold a raw newline (`escape` rewrites it), so
+    // the first separator is exactly where the first whole record begins.
+    const whole = if (start == 0) bytes else bytes[(std.mem.indexOfScalar(u8, bytes, '\n') orelse return &.{}) + 1 ..];
+
+    return dedupe(arena, whole);
+}
+
+/// Feeds whole records to the deduper, newest first, keeping the first sighting
+/// of each pair.
+fn collect(arena: Allocator, bytes: []const u8, unique: *Deduper, out: *std.ArrayList(Entry)) !void {
+    var it = std.mem.splitBackwardsScalar(u8, bytes, '\n');
+    while (it.next()) |line| {
+        if (line.len == 0) continue;
+        const entry = try parse(arena, line);
+        if (unique.seen(entry)) continue;
+        out.appendAssumeCapacity(entry);
+    }
 }
 
 /// Absolute path of the history store: `$XDG_DATA_HOME/whetuu/history`, else
@@ -108,6 +149,44 @@ test "a leading space keeps a command out of the store" {
     try std.testing.expect(!isIgnored("git status "));
 }
 
+/// Remembers which (directory, command) pairs a load has already offered, so
+/// only the most recent occurrence of each survives.
+///
+/// The pair is hashed where it lies rather than joined into one key first.
+/// Joining cost an allocation and a copy for every line in the store, on the
+/// path that runs before the picker can draw anything.
+const Deduper = struct {
+    const Map = std.HashMap(Entry, void, Context, std.hash_map.default_max_load_percentage);
+
+    const Context = struct {
+        pub fn hash(_: Context, entry: Entry) u64 {
+            var h: std.hash.Wyhash = .init(0);
+            h.update(entry.cwd);
+            // Without a separator "ab" + "c" and "a" + "bc" hash alike, which
+            // would drop one of two genuinely different entries.
+            h.update(&.{0});
+            h.update(entry.command);
+            return h.final();
+        }
+
+        pub fn eql(_: Context, a: Entry, b: Entry) bool {
+            return std.mem.eql(u8, a.cwd, b.cwd) and std.mem.eql(u8, a.command, b.command);
+        }
+    };
+
+    map: Map,
+
+    fn init(arena: Allocator) Deduper {
+        return .{ .map = .init(arena) };
+    }
+
+    /// Whether this pair has been offered already, recording it when not.
+    /// Assumes the caller sized the map for every line it will be shown.
+    fn seen(dedup: *Deduper, entry: Entry) bool {
+        return dedup.map.getOrPutAssumeCapacity(entry).found_existing;
+    }
+};
+
 /// Splits raw file bytes into unique (directory, command) entries, most-recent
 /// occurrence winning, ordered newest first. Walks lines back-to-front so the
 /// first sighting of a pair is its latest one (and carries that occurrence's
@@ -117,24 +196,15 @@ fn dedupe(arena: Allocator, bytes: []const u8) ![]const Entry {
     // One line is at most one entry, so counting them sizes both containers
     // exactly once. Letting them grow instead costs more than half the time
     // spent here, in rehashing and in arena copies that can never grow in
-    // place — the keys allocated between them keep the list from being last.
+    // place.
     const lines = std.mem.count(u8, bytes, "\n") + 1;
 
-    var seen: std.StringHashMap(void) = .init(arena);
-    try seen.ensureTotalCapacity(std.math.lossyCast(u32, lines));
+    var unique: Deduper = .init(arena);
+    try unique.map.ensureTotalCapacity(std.math.lossyCast(u32, lines));
     var out: std.ArrayList(Entry) = .empty;
     try out.ensureTotalCapacity(arena, lines);
 
-    var it = std.mem.splitBackwardsScalar(u8, bytes, '\n');
-    while (it.next()) |line| {
-        if (line.len == 0) continue;
-        const entry = try parse(arena, line);
-        const key = try std.fmt.allocPrint(arena, "{s}\x00{s}", .{ entry.cwd, entry.command });
-        if (seen.contains(key)) continue;
-        seen.putAssumeCapacity(key, {});
-        out.appendAssumeCapacity(entry);
-    }
-
+    try collect(arena, bytes, &unique, &out);
     return out.toOwnedSlice(arena);
 }
 
@@ -274,6 +344,88 @@ test "dedupe keeps the same command per directory" {
     try std.testing.expectEqualStrings("/a", got[0].cwd);
     try std.testing.expectEqual(@as(i64, 30), got[0].timestamp);
     try std.testing.expectEqualStrings("/b", got[1].cwd);
+}
+
+test "the pair hash separates the directory from the command" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Without a separator between the two fields these two lines hash alike,
+    // and the second would be dropped as a duplicate of the first.
+    const got = try dedupe(arena.allocator(), "10\t/ab\tc\n20\t/a\tbc\n");
+    try std.testing.expectEqual(@as(usize, 2), got.len);
+}
+
+test "load returns the same entries as reading the whole file at once" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // Every command distinct, so a record lost or torn changes the count.
+    const count = 20_000;
+    var raw: std.ArrayList(u8) = .empty;
+    for (0..count) |i| {
+        try raw.print(a, "{d}\t/dev/whetuu\tgit commit -m \"change number {d}\"\n", .{ 1_700_000_000 + i, i });
+    }
+    try tmp.dir.writeFile(io, .{ .sub_path = "history", .data = raw.items });
+
+    const path = try tmp.dir.realPathFileAlloc(io, "history", a);
+    const got = try load(io, a, path);
+
+    // Same entries, same order as reading the whole file in one go.
+    const want = try dedupe(a, raw.items);
+    try std.testing.expectEqual(want.len, got.len);
+    for (want, got) |w, g| {
+        try std.testing.expectEqualStrings(w.command, g.command);
+        try std.testing.expectEqualStrings(w.cwd, g.cwd);
+        try std.testing.expectEqual(w.timestamp, g.timestamp);
+    }
+
+    // Newest first, and nothing torn at either end of the file.
+    try std.testing.expectEqualStrings("git commit -m \"change number 19999\"", got[0].command);
+    try std.testing.expectEqualStrings("git commit -m \"change number 0\"", got[got.len - 1].command);
+}
+
+test "a store past the read budget keeps its newest commands" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var raw: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (raw.items.len < read_budget + (1 << 20)) : (i += 1) {
+        try raw.print(a, "{d}\t/dev/whetuu\tcommand number {d}\n", .{ 1_700_000_000 + i, i });
+    }
+    try tmp.dir.writeFile(io, .{ .sub_path = "history", .data = raw.items });
+
+    const path = try tmp.dir.realPathFileAlloc(io, "history", a);
+    const got = try load(io, a, path);
+
+    // Bounded by the window, not by the file.
+    try std.testing.expect(got.len > 0);
+    try std.testing.expect(got.len < i);
+
+    // The window drops the oldest and never the newest, so the entry the
+    // picker opens on is still the last command run.
+    const newest = try std.fmt.allocPrint(a, "command number {d}", .{i - 1});
+    try std.testing.expectEqualStrings(newest, got[0].command);
+
+    // And what survives is whole, never a command cut in half by the window.
+    for (got) |entry| {
+        try std.testing.expect(std.mem.startsWith(u8, entry.command, "command number "));
+        try std.testing.expectEqualStrings("/dev/whetuu", entry.cwd);
+        try std.testing.expect(entry.timestamp >= 1_700_000_000);
+    }
 }
 
 test "storePath prefers XDG_DATA_HOME then HOME" {

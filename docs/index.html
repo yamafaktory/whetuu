@@ -603,6 +603,7 @@ footer p { margin: 0 0 0.4rem; }
   </div>
   <p class="note">Measured with <code>hyperfine --warmup 40 --runs 400</code> on a 13th gen i9-13900H, ReleaseFast, pinned to the performance cores on an otherwise idle machine. In the monorepo the whole status line takes about as long as <code>git status</code> on its own.</p>
   <p class="note"><b>A slow repository cannot hang your shell.</b> Both subprocesses are bounded. Git gets 250 ms and the toolchain probe gets 200 ms, and they run at the same time, so the worst case is the larger of the two. Given a git that hangs for 30 seconds, the status line still returns in 257 ms. It simply drops the git segment.</p>
+  <p class="note"><b>A big history does not slow the picker.</b> The up arrow reads the most recent few megabytes rather than the whole store, so it opens in about 20 ms on a store of 70 MB just as it does on one of 400 KB. Nothing is deleted to keep it that way. Years of history stay on disk.</p>
 </section>
 <section class="wrap" id="security">
   <p class="eyebrow">~/security</p>
