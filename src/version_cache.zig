@@ -13,6 +13,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const Dir = Io.Dir;
+const posix = std.posix;
 
 /// Generous bound for the whole file — one short line per toolchain ever used.
 const read_limit: std.Io.Limit = .limited(64 * 1024);
@@ -77,7 +78,9 @@ pub fn get(io: Io, arena: Allocator, cache_path: []const u8, name: []const u8, k
 
 /// Records `version` for `name`, replacing any previous entry. Written to a
 /// temporary file and renamed, so a render reading the cache never observes a
-/// half-written file — several shells may render at once.
+/// half-written file — several shells may render at once. The temporary carries
+/// the process id, because a name shared between them would put two concurrent
+/// renders in the same file and rename whatever their writes made of it.
 pub fn put(
     io: Io,
     arena: Allocator,
@@ -104,9 +107,19 @@ pub fn put(
     }
     out.print(arena, "{s}\t{s}\t{d}\t{d}\t{s}\n", .{ name, key.path, key.mtime, key.size, version }) catch return;
 
-    const tmp = std.fmt.allocPrint(arena, "{s}.tmp", .{cache_path}) catch return;
+    const tmp = tmpPath(arena, cache_path) catch return;
     writeAll(io, tmp, out.items) catch return;
-    Dir.renameAbsolute(tmp, cache_path, io) catch return;
+    // A temporary of its own is one file left behind per failed rename, where a
+    // shared one was simply overwritten by the next render.
+    Dir.renameAbsolute(tmp, cache_path, io) catch Dir.deleteFileAbsolute(io, tmp) catch {};
+}
+
+/// Where `put` stages the new cache before renaming it into place. The process
+/// id makes it this render's file and nobody else's: several shells render at
+/// once, and one shared name means two of them opening, truncating and writing
+/// the same file before either renames it.
+fn tmpPath(arena: Allocator, cache_path: []const u8) Allocator.Error![]const u8 {
+    return std.fmt.allocPrint(arena, "{s}.{d}.tmp", .{ cache_path, posix.system.getpid() });
 }
 
 fn writeAll(io: Io, abs_path: []const u8, bytes: []const u8) !void {
@@ -164,6 +177,61 @@ test "parse round-trips a well-formed line" {
     try std.testing.expectEqual(@as(i96, 123), entry.key.mtime);
     try std.testing.expectEqual(@as(u64, 456), entry.key.size);
     try std.testing.expectEqualStrings("0.17.0", entry.version);
+}
+
+test "the staging file belongs to one render, not to all of them" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // A shared "<cache>.tmp" had two concurrent renders truncating and writing
+    // the same file, then renaming whatever their writes left in it.
+    const tmp = try tmpPath(arena.allocator(), "/c/whetuu/versions");
+    try std.testing.expect(!std.mem.eql(u8, "/c/whetuu/versions.tmp", tmp));
+    try std.testing.expect(std.mem.startsWith(u8, tmp, "/c/whetuu/versions."));
+    try std.testing.expect(std.mem.endsWith(u8, tmp, ".tmp"));
+
+    const pid = try std.fmt.allocPrint(arena.allocator(), ".{d}.", .{posix.system.getpid()});
+    try std.testing.expect(std.mem.indexOf(u8, tmp, pid) != null);
+}
+
+test "put replaces one entry and leaves no staging file behind" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const dir_path = try tmp_dir.dir.realPathFileAlloc(io, ".", a);
+    const cache_path = try std.fs.path.join(a, &.{ dir_path, "versions" });
+    const zig: Key = .{ .path = "/usr/bin/zig", .mtime = 1, .size = 2 };
+    const go: Key = .{ .path = "/usr/bin/go", .mtime = 3, .size = 4 };
+
+    put(io, a, cache_path, "zig", zig, "0.17.0");
+    put(io, a, cache_path, "go", go, "1.22.0");
+    put(io, a, cache_path, "zig", zig, "0.18.0");
+
+    try std.testing.expectEqualStrings("0.18.0", get(io, a, cache_path, "zig", zig).?);
+    try std.testing.expectEqualStrings("1.22.0", get(io, a, cache_path, "go", go).?);
+
+    // A newer executable misses, and so does a toolchain never recorded.
+    try std.testing.expect(get(io, a, cache_path, "zig", .{ .path = zig.path, .mtime = 9, .size = 2 }) == null);
+    try std.testing.expect(get(io, a, cache_path, "rust", zig) == null);
+
+    // The rename consumes the staging file, so the cache directory holds only
+    // the cache itself.
+    var listing = try Io.Dir.openDirAbsolute(io, dir_path, .{ .iterate = true });
+    defer listing.close(io);
+
+    var count: usize = 0;
+    var it = listing.iterate();
+    while (try it.next(io)) |entry| {
+        try std.testing.expectEqualStrings("versions", entry.name);
+        count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), count);
 }
 
 test "parse rejects malformed lines" {
