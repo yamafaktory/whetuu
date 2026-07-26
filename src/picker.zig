@@ -219,6 +219,10 @@ fn initialScope(items: []const Entry, cwd: []const u8) Scope {
     if (cwd.len == 0) return .all;
 
     for (items) |item| {
+        // The just-failed command carries the current directory but was never
+        // stored, so counting it as history would open a fresh directory scoped
+        // to that one row and hide everything else there is.
+        if (item.failed) continue;
         if (std.mem.eql(u8, item.cwd, cwd)) return .dir;
     }
 
@@ -871,6 +875,19 @@ test "initialScope opens scoped only when the directory has history" {
     try std.testing.expectEqual(Scope.dir, initialScope(&items, "/a"));
     try std.testing.expectEqual(Scope.all, initialScope(&items, "/fresh"));
     try std.testing.expectEqual(Scope.all, initialScope(&items, ""));
+}
+
+test "the failed command does not count as the directory having history" {
+    // It is prepended with the current directory but was never stored. Counting
+    // it opened a fresh directory on one row, hiding every command there was.
+    const items = [_]Entry{
+        .{ .command = "gti status", .cwd = "/fresh", .timestamp = 2, .failed = true },
+        .{ .command = "zig build", .cwd = "/a", .timestamp = 1 },
+    };
+    try std.testing.expectEqual(Scope.all, initialScope(&items, "/fresh"));
+
+    // A directory that has history of its own still opens scoped to it.
+    try std.testing.expectEqual(Scope.dir, initialScope(&items, "/a"));
 }
 
 test "dirLabel collapses home and elides long paths from the front" {
