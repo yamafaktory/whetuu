@@ -48,7 +48,9 @@ const Size = struct {
     rows: u16,
 };
 
-/// A keypress decoded from the raw terminal input stream.
+/// A keypress decoded from the raw terminal input stream. `newest` and `oldest`
+/// are Home and End, named for what they do to a list that runs backwards in
+/// time rather than for the keys that send them.
 const Key = union(enum) {
     char: u8,
     enter,
@@ -56,6 +58,8 @@ const Key = union(enum) {
     backspace,
     up,
     down,
+    newest,
+    oldest,
     scope,
     cancel,
     tick,
@@ -188,8 +192,16 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
                 refilter = true;
                 editing = true;
             },
+            .newest => {
+                selected = 0;
+                editing = false;
+            },
+            .oldest => {
+                selected = shown.len -| 1;
+                editing = false;
+            },
             .backspace => {
-                if (query.pop() != null) refilter = true;
+                if (popCodepoint(&query)) refilter = true;
                 selected = 0;
             },
             .char => |c| {
@@ -227,6 +239,18 @@ fn initialScope(items: []const Entry, cwd: []const u8) Scope {
     }
 
     return .all;
+}
+
+/// Drops the last codepoint of `query`, returning whether there was one. Tab can
+/// copy a stored command holding a multibyte character into the query, and
+/// dropping a byte of one would leave the rest to render as replacement glyphs.
+fn popCodepoint(query: *std.ArrayList(u8)) bool {
+    if (query.items.len == 0) return false;
+
+    var len: usize = 1;
+    while (len < query.items.len and query.items[query.items.len - len] & 0xc0 == 0x80) len += 1;
+    query.items.len -= len;
+    return true;
 }
 
 /// Returns the entries `scope` admits, order preserved. The `.dir` scope keeps
@@ -384,20 +408,7 @@ const Decoded = struct {
 /// separate from the read so a pasted run decodes exactly like the same bytes
 /// typed one at a time.
 fn decodeKey(bytes: []const u8) Decoded {
-    if (bytes[0] == 0x1b) {
-        if (bytes.len >= 3 and bytes[1] == '[') {
-            return .{
-                .key = switch (bytes[2]) {
-                    'A' => .up,
-                    'B' => .down,
-                    else => .other,
-                },
-                .len = 3,
-            };
-        }
-
-        return .{ .key = .cancel, .len = 1 };
-    }
+    if (bytes[0] == 0x1b) return decodeEscape(bytes);
 
     const key: Key = switch (bytes[0]) {
         '\r', '\n' => .enter,
@@ -408,6 +419,63 @@ fn decodeKey(bytes: []const u8) Decoded {
         else => if (bytes[0] >= 0x20 and bytes[0] < 0x7f) Key{ .char = bytes[0] } else .other,
     };
     return .{ .key = key, .len = 1 };
+}
+
+/// Decodes the escape sequence starting at `bytes[0]`, which is the escape byte.
+/// The whole sequence is consumed whatever it turns out to be, so a key the
+/// picker has no use for is swallowed rather than leaving its tail to be read as
+/// text: Delete arrives as `\x1b[3~`, and stopping after three bytes typed a
+/// literal `~` into the query.
+///
+/// An escape that resolves into no sequence at all is the cancel key.
+fn decodeEscape(bytes: []const u8) Decoded {
+    // SS3, which is what a terminal in application cursor mode sends for the
+    // arrows and for Home and End. The shell integrations bind both forms for
+    // the same reason.
+    if (bytes.len >= 3 and bytes[1] == 'O') return .{ .key = finalKey(bytes[2], ""), .len = 3 };
+    if (bytes.len < 3 or bytes[1] != '[') return .{ .key = .cancel, .len = 1 };
+
+    // CSI: parameter bytes, then intermediates, then the one final byte that
+    // says which key it was.
+    var i: usize = 2;
+    while (i < bytes.len and bytes[i] >= 0x30 and bytes[i] <= 0x3f) i += 1;
+    const params = bytes[2..i];
+    while (i < bytes.len and bytes[i] >= 0x20 and bytes[i] <= 0x2f) i += 1;
+
+    // Cut short by the end of the buffer. Swallow what arrived rather than let
+    // the rest of a sequence read as text.
+    if (i == bytes.len) return .{ .key = .other, .len = bytes.len };
+
+    return .{ .key = finalKey(bytes[i], params), .len = i + 1 };
+}
+
+/// The key a sequence's final byte names, given its parameters. A modifier only
+/// ever arrives as a parameter, so Ctrl+Up moves the selection exactly as a bare
+/// Up does instead of typing the difference.
+fn finalKey(final: u8, params: []const u8) Key {
+    return switch (final) {
+        'A' => .up,
+        'B' => .down,
+        'H' => .newest,
+        'F' => .oldest,
+        '~' => tildeKey(params),
+        else => .other,
+    };
+}
+
+/// The key a `CSI <n> ~` sequence names, the form most terminals use for the
+/// editing keys. Delete is backspace here, since the cursor is parked at the end
+/// of the query and there is never anything ahead of it to delete. Anything else
+/// — a function key, a bracketed-paste marker — is swallowed.
+fn tildeKey(params: []const u8) Key {
+    const digits = params[0 .. std.mem.indexOfScalar(u8, params, ';') orelse params.len];
+    const n = std.fmt.parseInt(u8, digits, 10) catch return .other;
+    return switch (n) {
+        1, 7 => .newest,
+        3 => .backspace,
+        4, 8 => .oldest,
+        else => .other,
+    };
 }
 
 /// Buffers terminal input. A paste arrives as one burst rather than a byte per
@@ -495,6 +563,91 @@ test "an arrow escape consumes the whole sequence" {
     const escape = decodeKey("\x1b");
     try std.testing.expect(std.meta.activeTag(escape.key) == .cancel);
     try std.testing.expectEqual(@as(usize, 1), escape.len);
+}
+
+/// The keys `bytes` decodes to, as the tag names, so a test reads as the
+/// sequence it is checking.
+fn decodeAll(arena: Allocator, bytes: []const u8) ![]const []const u8 {
+    var tags: std.ArrayList([]const u8) = .empty;
+    var i: usize = 0;
+    while (i < bytes.len) {
+        const decoded = decodeKey(bytes[i..]);
+        try tags.append(arena, switch (decoded.key) {
+            .char => |c| try std.fmt.allocPrint(arena, "'{c}'", .{c}),
+            else => @tagName(decoded.key),
+        });
+        i += decoded.len;
+    }
+
+    return tags.toOwnedSlice(arena);
+}
+
+fn expectKeys(bytes: []const u8, expected: []const []const u8) !void {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const got = try decodeAll(arena.allocator(), bytes);
+    try std.testing.expectEqual(expected.len, got.len);
+    for (expected, got) |want, tag| try std.testing.expectEqualStrings(want, tag);
+}
+
+test "an unhandled escape sequence is swallowed whole, never typed into the query" {
+    // Every one of these used to leave its tail behind as text: Delete typed a
+    // `~`, Ctrl+Up typed `;5A`, and a bracketed paste typed its own markers.
+    try expectKeys("\x1b[5~", &.{"other"}); // PageUp
+    try expectKeys("\x1b[15~", &.{"other"}); // F5
+    try expectKeys("\x1b[200~ls\x1b[201~", &.{ "other", "'l'", "'s'", "other" });
+    try expectKeys("\x1b[<0;1;1M", &.{"other"}); // a mouse report
+
+    // A sequence cut in half by the end of a read goes the same way, rather
+    // than the half that arrived reading as text.
+    try expectKeys("\x1b[1;5", &.{"other"});
+}
+
+test "a modifier does not change which key a sequence names" {
+    try expectKeys("\x1b[1;5A", &.{"up"}); // Ctrl+Up
+    try expectKeys("\x1b[1;2B", &.{"down"}); // Shift+Down
+    try expectKeys("\x1b[3;5~", &.{"backspace"}); // Ctrl+Delete
+}
+
+test "the arrows work in application cursor mode, where they arrive as SS3" {
+    // The shell integrations bind both forms because a terminal sends one or
+    // the other depending on keypad mode. The picker read the SS3 form as a
+    // bare escape, so the up arrow that opened it then closed it.
+    try expectKeys("\x1bOA", &.{"up"});
+    try expectKeys("\x1bOB", &.{"down"});
+    try expectKeys("\x1bOH", &.{"newest"});
+    try expectKeys("\x1bOF", &.{"oldest"});
+}
+
+test "Home and End jump to the ends of the list, Delete backspaces" {
+    // The three forms terminals use for each.
+    try expectKeys("\x1b[H", &.{"newest"});
+    try expectKeys("\x1b[1~", &.{"newest"});
+    try expectKeys("\x1b[7~", &.{"newest"});
+    try expectKeys("\x1b[F", &.{"oldest"});
+    try expectKeys("\x1b[4~", &.{"oldest"});
+    try expectKeys("\x1b[8~", &.{"oldest"});
+
+    // Nothing is ever ahead of the cursor, which is parked at the end of the
+    // query, so Delete removes the character behind it.
+    try expectKeys("\x1b[3~", &.{"backspace"});
+}
+
+test "backspace drops a whole character, not one byte of one" {
+    var query: std.ArrayList(u8) = .empty;
+    defer query.deinit(std.testing.allocator);
+
+    // Tab copies stored commands in, so the query can hold multibyte text.
+    try query.appendSlice(std.testing.allocator, "echo café");
+    try std.testing.expect(popCodepoint(&query));
+    try std.testing.expectEqualStrings("echo caf", query.items);
+
+    try std.testing.expect(popCodepoint(&query));
+    try std.testing.expectEqualStrings("echo ca", query.items);
+
+    query.clearRetainingCapacity();
+    try std.testing.expect(!popCodepoint(&query));
 }
 
 test "a burst mixing text and control keys decodes in order" {

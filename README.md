@@ -352,7 +352,10 @@ yet. A bar at the top names both scopes and highlights the active one, like
 `~/dev/whetuu | all`.
 
 - **type to filter** — every word must match, ignoring case
+- **Backspace / Delete** — drop the last character of the search. The cursor
+  never leaves the end of it, so the two keys do the same thing
 - **↑ / ↓** — move the selection, where ↑ goes further back in time
+- **Home / End** — jump to the newest command or to the oldest one on the list
 - **Ctrl+G** — switch between this directory's history and all history
 - **Tab** — copy the selected command into the search field, with a trailing
   space, so you can edit it or append flags before running. Enter then runs what
