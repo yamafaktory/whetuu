@@ -857,12 +857,13 @@ fn totalWidth(tokens: []const highlight.Token) usize {
 }
 
 /// Returns `text` as the single line a list row shows: every whitespace run
-/// collapsed to one space, the ends trimmed, and every remaining control byte
-/// replaced by `?`. Collapsing has to come first, since a multi-line command
-/// round-trips through the store with real newlines and would otherwise arrive
-/// here as a row of `?`. This only changes how an entry is drawn — Enter and
-/// Tab both hand back the stored command untouched, so what runs is what was
-/// recorded, spacing and all.
+/// collapsed to one space, the ends trimmed, and everything left that cannot be
+/// drawn replaced by `?`. Collapsing has to come first, since a multi-line
+/// command round-trips through the store with real newlines and would otherwise
+/// arrive here as a row of `?`. Defanging comes second and through `sanitize`,
+/// so a row is held to the same rule as the rest of what whetuu draws. This only
+/// changes how an entry is drawn — Enter and Tab both hand back the stored
+/// command untouched, so what runs is what was recorded, spacing and all.
 fn oneLine(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
     if (!needsCollapsing(text)) return style.sanitize(arena, text);
 
@@ -878,10 +879,10 @@ fn oneLine(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
             pending = false;
         }
 
-        try out.append(arena, if (style.isControlByte(c)) '?' else c);
+        try out.append(arena, c);
     }
 
-    return out.toOwnedSlice(arena);
+    return style.sanitize(arena, out.items);
 }
 
 /// True when `text` holds whitespace that a row would render differently:
@@ -1245,6 +1246,28 @@ test "collapsing still defangs escape sequences" {
     const a = arena.allocator();
     try std.testing.expectEqualStrings("ls ?[31mred", try oneLine(a, "ls  \x1b[31mred"));
     try std.testing.expectEqualStrings("ls?[31mred", try oneLine(a, "ls\x1b[31mred"));
+}
+
+test "a row already in the store that is not text still draws as text" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // An image pasted into the terminal, run as the last line of a buffer whose
+    // final command worked. `add` refuses these now, but one recorded before
+    // that is still in the store and still has to draw.
+    const pasted = "\x89PNG\n\n\nclear";
+    try std.testing.expectEqualStrings("?PNG clear", try oneLine(a, pasted));
+
+    // The collapsing path used to defang on its own and knew only about control
+    // bytes, so it let this one through to the terminal raw.
+    try std.testing.expect(std.unicode.utf8ValidateSlice(try oneLine(a, pasted)));
+    try std.testing.expect(std.unicode.utf8ValidateSlice(try oneLine(a, "a  \xff  b")));
+
+    // Multibyte text survives both paths intact, so the column count stays
+    // exact for the rows that are text.
+    try std.testing.expectEqualStrings("git log — mine", try oneLine(a, "git  log\n—  mine"));
+    try std.testing.expectEqualStrings("git log — mine", try oneLine(a, "git log — mine"));
 }
 
 test "rows replace control bytes in stored commands" {

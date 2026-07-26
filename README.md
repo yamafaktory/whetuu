@@ -159,6 +159,12 @@ whetuu reads your repository and prints a line. Here is what that involves.
   the picker, not a safeguard. It filters out your typos, not your working
   `curl`.
 
+- **A command that is not text is not stored either.** Paste an image into your
+  terminal and the shell keeps whatever survived of it on the command line. Run
+  that as part of a line ending in a command that works and the shell reports
+  the whole thing as having exited `0`. whetuu drops it rather than fill the
+  picker with a row nothing can run.
+
 One thing to know. The language module picks which toolchain to probe from the
 files in the current directory. So entering an untrusted repository can make
 whetuu run something like `node --version`. It runs the binary your `PATH`

@@ -48,11 +48,19 @@ pub const Entry = struct {
 /// A command that starts with a space or tab is not recorded at all — the
 /// long-standing shell convention for "keep this one out of history", and the
 /// only way to keep a secret typed on the command line out of the store.
+///
+/// Neither is a command that is not valid UTF-8. Binary reaches a command line
+/// more easily than it sounds — paste an image into the terminal and the shell
+/// keeps whatever survived of it — and the rest of whetuu reads the store as
+/// text: rows are measured in codepoints, and bytes belonging to no codepoint
+/// make that measurement fall back to counting bytes. Enforcing it here is what
+/// lets everything downstream assume it.
 pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd: []const u8, now: i64) !void {
     if (isIgnored(command)) return;
 
     const trimmed = std.mem.trim(u8, command, " \t\r\n");
     if (trimmed.len == 0) return;
+    if (!std.unicode.utf8ValidateSlice(trimmed)) return;
 
     if (std.fs.path.dirname(path)) |dir| {
         Dir.cwd().createDirPath(io, dir) catch |err| switch (err) {
@@ -147,6 +155,37 @@ test "a leading space keeps a command out of the store" {
     try std.testing.expect(!isIgnored(""));
     // Trailing whitespace is not an opt-out; only the first byte counts.
     try std.testing.expect(!isIgnored("git status "));
+}
+
+test "a command that is not text never reaches the store" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try std.fs.path.join(a, &.{ dir, "history" });
+
+    // Paste an image into a terminal and the shell keeps what survived of it.
+    // Run it as the last line of a buffer ending in a command that works and
+    // the whole buffer is reported as having exited 0, so nothing upstream
+    // stops it.
+    try add(io, a, path, "\x89PNG\n\n\nclear", "/w", 30);
+    try std.testing.expectEqual(@as(usize, 0), (try load(io, a, path)).len);
+
+    // Text is recorded as it always was, multiple lines and multibyte
+    // characters included.
+    try add(io, a, path, "git commit -m 'plan — done'", "/w", 31);
+    try add(io, a, path, "for f in *.zig\ndo\n\techo $f\ndone", "/w", 32);
+
+    const stored = try load(io, a, path);
+    try std.testing.expectEqual(@as(usize, 2), stored.len);
+    try std.testing.expectEqualStrings("for f in *.zig\ndo\n\techo $f\ndone", stored[0].command);
+    try std.testing.expectEqualStrings("git commit -m 'plan — done'", stored[1].command);
 }
 
 /// Remembers which (directory, command) pairs a load has already offered, so

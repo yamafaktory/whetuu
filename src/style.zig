@@ -157,26 +157,63 @@ pub fn single(arena: Allocator, sty: Style, text: []const u8) Allocator.Error![]
     return spans;
 }
 
-/// True for bytes that must never reach the terminal raw (C0 controls and
-/// DEL): they enable escape-sequence injection through untrusted text such as
-/// directory or command names.
-/// Returns `text` with every control byte replaced by `?`, allocating only
-/// when there is one to replace. Anything that reaches the terminal from a
+/// Returns `text` with every byte unsafe to draw replaced by `?`, allocating
+/// only when there is one to replace. Anything that reaches the terminal from a
 /// command line, a branch name or a directory goes through here first, so a
 /// repository you just cloned cannot repaint your screen through whetuu.
 pub fn sanitize(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
-    for (text) |c| {
-        if (isControlByte(c)) break;
-    } else return text;
+    if (safeRun(text) == text.len) return text;
 
-    const out = try arena.dupe(u8, text);
-    for (out) |*c| {
-        if (isControlByte(c.*)) c.* = '?';
+    // One `?` per replaced byte, so the result is never longer than the input.
+    var out: std.ArrayList(u8) = .empty;
+    try out.ensureTotalCapacity(arena, text.len);
+
+    var rest = text;
+    while (rest.len > 0) {
+        const safe = safeRun(rest);
+        if (safe > 0) {
+            out.appendSliceAssumeCapacity(rest[0..safe]);
+        } else {
+            out.appendAssumeCapacity('?');
+        }
+        rest = rest[@max(safe, 1)..];
     }
 
-    return out;
+    return out.toOwnedSlice(arena);
 }
 
+/// The length of the run at the start of `text` that is safe to draw as it is:
+/// no control bytes, and well-formed UTF-8. Zero when the very first byte must
+/// be replaced, so a caller alternates between copying a run and writing one
+/// `?`.
+///
+/// Malformed UTF-8 counts as unsafe because the terminal is not the only thing
+/// that has to make sense of it. Column widths are counted in codepoints, and a
+/// byte belonging to no codepoint makes that count silently fall back to
+/// counting bytes — which then puts the elision and the selected row's bar in
+/// the wrong column for every multibyte character on the row.
+fn safeRun(text: []const u8) usize {
+    var i: usize = 0;
+    while (i < text.len) {
+        const c = text[i];
+        if (c < 0x80) {
+            if (isControlByte(c)) break;
+            i += 1;
+            continue;
+        }
+
+        const len = std.unicode.utf8ByteSequenceLength(c) catch break;
+        if (i + len > text.len) break;
+        if (!std.unicode.utf8ValidateSlice(text[i..][0..len])) break;
+        i += len;
+    }
+
+    return i;
+}
+
+/// True for bytes that must never reach the terminal raw (C0 controls and
+/// DEL): they enable escape-sequence injection through untrusted text such as
+/// directory or command names.
 pub fn isControlByte(c: u8) bool {
     return c < 0x20 or c == 0x7f;
 }
@@ -199,18 +236,20 @@ fn wrapEnd(w: *Writer, shell: Shell) Writer.Error!void {
     }
 }
 
-/// Writes `text` with every control byte replaced by `?`, so untrusted names
-/// cannot smuggle escape sequences into the terminal.
+/// Writes `text` with every unsafe byte replaced by `?`, so untrusted names
+/// cannot smuggle escape sequences into the terminal. The streaming twin of
+/// `sanitize`, sharing its rule so the status line and the picker defang alike.
 fn writeSanitized(w: *Writer, text: []const u8) Writer.Error!void {
-    var start: usize = 0;
-    for (text, 0..) |c, i| {
-        if (!isControlByte(c)) continue;
-        try w.writeAll(text[start..i]);
-        try w.writeByte('?');
-        start = i + 1;
+    var rest = text;
+    while (rest.len > 0) {
+        const safe = safeRun(rest);
+        if (safe > 0) {
+            try w.writeAll(rest[0..safe]);
+        } else {
+            try w.writeByte('?');
+        }
+        rest = rest[@max(safe, 1)..];
     }
-
-    try w.writeAll(text[start..]);
 }
 
 test "default style writes plain text with no escapes" {
@@ -259,6 +298,63 @@ test "sanitize defangs control bytes and leaves clean text alone" {
     try std.testing.expectEqualStrings("?[31mred", try sanitize(a, "\x1b[31mred"));
     try std.testing.expectEqualStrings("a?]2;x?b", try sanitize(a, "a\x1b]2;x\x07b"));
     try std.testing.expectEqualStrings("", try sanitize(a, ""));
+}
+
+test "sanitize replaces bytes that belong to no codepoint" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // The signature of a PNG pasted into a terminal. 0x89 sits above the
+    // control range, so it used to reach the terminal raw and draw as the
+    // replacement glyph.
+    try std.testing.expectEqualStrings("?PNG", try sanitize(a, "\x89PNG"));
+
+    // A truncated sequence, a lone continuation byte, and a lead byte with too
+    // few continuations each go one `?` per byte.
+    try std.testing.expectEqualStrings("caf?", try sanitize(a, "caf\xc3"));
+    try std.testing.expectEqualStrings("a?b", try sanitize(a, "a\x80b"));
+    try std.testing.expectEqualStrings("??ls", try sanitize(a, "\xe2\x82ls"));
+
+    // Well-formed multibyte text is left exactly as it is, unallocated.
+    const clean = "git commit -m 'plan — done' ✓";
+    try std.testing.expectEqual(clean.ptr, (try sanitize(a, clean)).ptr);
+}
+
+test "what sanitize returns is always drawable as itself" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // The picker counts a row's columns in codepoints and falls back to
+    // counting bytes when that fails, so a row it cannot count is a row it
+    // elides and highlights in the wrong column.
+    for ([_][]const u8{
+        "\x89PNG\n\n\nclear",
+        "echo caf\xc3\xa9 \xff\xfe",
+        "\xed\xa0\x80", // a surrogate half, which is not a codepoint
+        "\xc0\x80", // an overlong encoding of NUL
+        "ls",
+        "",
+    }) |text| {
+        const safe = try sanitize(a, text);
+        try std.testing.expect(std.unicode.utf8ValidateSlice(safe));
+        // Never longer than what went in, so a row cannot outgrow its budget.
+        try std.testing.expect(safe.len <= text.len);
+    }
+}
+
+test "the streaming and allocating sanitizers agree" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    for ([_][]const u8{ "\x89PNG", "a\x1b[31mb", "caf\xc3\xa9", "\xf0\x9f\x8c\x9f", "" }) |text| {
+        var buf: [64]u8 = undefined;
+        var w: Writer = .fixed(&buf);
+        try write(&w, .fish, .{}, text);
+        try std.testing.expectEqualStrings(try sanitize(a, text), w.buffered());
+    }
 }
 
 test "rgb emits a truecolor escape and overrides color" {
