@@ -23,6 +23,7 @@ set -eu
 
 repo=yamafaktory/whetuu
 tmp=
+staged=
 default_dir="$HOME/.local/bin"
 
 die() {
@@ -36,6 +37,9 @@ say() {
 
 cleanup() {
     [ -n "$tmp" ] && [ -d "$tmp" ] && rm -rf "$tmp"
+    # A half-copied binary the install stopped before renaming into place.
+    [ -n "$staged" ] && [ -f "$staged" ] && rm -f "$staged"
+    return 0
 }
 trap cleanup EXIT INT TERM
 
@@ -144,12 +148,19 @@ expected=$(awk -v want="$tarball" '{ name = $2; sub(/^\.\//, "", name); if (name
 
 tar -xzf "$tmp/$tarball" -C "$tmp" || die "could not unpack $tarball"
 [ -f "$tmp/whetuu" ] || die "the archive did not contain a whetuu binary"
-chmod +x "$tmp/whetuu"
 
 dir=$(pick_dir)
 mkdir -p "$dir" 2>/dev/null || die "could not create $dir. Set WHETUU_INSTALL_DIR to a directory you can write to."
 [ -w "$dir" ] || die "$dir is not writable. Set WHETUU_INSTALL_DIR to a directory you can write to, for example: curl -fsSL <url> | WHETUU_INSTALL_DIR=\"\$HOME/bin\" sh"
-mv "$tmp/whetuu" "$dir/whetuu"
+# Copy in beside the target first, then rename. The temporary directory is
+# usually on another filesystem, so a direct mv is a copy, and a copy that
+# stops halfway leaves a truncated whetuu on PATH — which every status line
+# then runs. A rename within one directory cannot be seen half done.
+staged="$dir/.whetuu.$$"
+cp "$tmp/whetuu" "$staged" || die "could not write to $dir. Set WHETUU_INSTALL_DIR to a directory you can write to."
+chmod +x "$staged"
+mv "$staged" "$dir/whetuu" || die "could not install to $dir/whetuu"
+staged=
 
 say "installed $version to $dir/whetuu"
 
