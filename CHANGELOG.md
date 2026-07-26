@@ -3,6 +3,16 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.9 — 2026-07-26
+
+### Changed
+
+- Install the binary with a rename, not a copy that can tear
+- Stage the version cache in a file of the render's own
+- Open a fresh directory on all history again after a failure
+- Answer Home, End and Delete, and drop the keys the picker ignores
+- Keep an image pasted into the terminal out of the store
+
 ## v0.1.8 — 2026-07-24
 
 ### Changed
