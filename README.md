@@ -75,6 +75,12 @@ Two things do most of the work. The probes overlap, so a render costs about what
 the slowest one costs rather than the sum of all of them. In the monorepo the
 whole status line takes about as long as `git status` on its own.
 
+Outside a repository neither of them runs. whetuu walks up from the current
+directory looking for the repository, which is a handful of `stat` calls, and
+only starts `git` once it has found one. That walk was already happening to read
+the operation state and the stash count. Doing it first is what makes a
+directory with no repository and no project cost a millisecond.
+
 Toolchain versions are also cached, keyed on the binary path, mtime and size.
 The first render in a project pays for the probe. Later ones read a small file
 instead. Upgrading a toolchain changes its mtime, which drops the stale entry.
@@ -132,7 +138,8 @@ whetuu reads your repository and prints a line. Here is what that involves.
   and nothing else. Delete it whenever you like.
 - **Two subprocesses, both bounded.** `git status --porcelain=2 --branch -z`,
   and the version command of the detected toolchain (`zig version`,
-  `node --version`, …). Nothing else is executed.
+  `node --version`, …). Neither runs outside a repository or a project. Nothing
+  else is executed.
 - **The history store is `0600`**, set again on every append. Command lines
   routinely contain paths and secrets. The store lives at
   `~/.local/share/whetuu/history`, or under `$XDG_DATA_HOME` when that is set.

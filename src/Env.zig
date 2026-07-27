@@ -18,6 +18,10 @@ user: []const u8 = "",
 path: []const u8 = "",
 /// Value of `$XDG_CACHE_HOME`; empty falls back to `$HOME/.cache`.
 cache_home: []const u8 = "",
+/// Value of `$GIT_DIR`; empty when unset. A set value points git at a
+/// repository the directory tree does not lead to, which is the one case where
+/// walking up from `cwd` is not enough to know whether there is a repo at all.
+git_dir: []const u8 = "",
 /// True when the shell runs over SSH (`$SSH_CONNECTION` or `$SSH_TTY` set).
 ssh: bool = false,
 /// Terminal width in columns; 0 when unknown.

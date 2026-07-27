@@ -5,6 +5,11 @@
 //! huge repository can never stall the status line. The operation state and the
 //! stash count are read straight from the `.git` directory — no extra
 //! subprocess.
+//!
+//! The walk to that directory happens first, and git is only asked once it has
+//! found one. Outside a repository the subprocess was most of what a render
+//! cost, to be told there is no repository — an answer a handful of stat calls
+//! already had.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -40,6 +45,9 @@ const GitInfo = struct {
 /// Renders the git segment, or null when not in a repo (or git is unavailable,
 /// times out, or output cannot be allocated).
 pub fn run(io: Io, arena: Allocator, env: *const Env) ?[]const Span {
+    const git_dir = findGitDir(io, arena, env.cwd);
+    if (!worthAsking(git_dir, env.git_dir)) return null;
+
     const raw = gitStatus(io, arena, env.cwd) orelse return null;
     var info = parse(raw);
 
@@ -50,10 +58,10 @@ pub fn run(io: Io, arena: Allocator, env: *const Env) ?[]const Span {
     const branch = std.fmt.allocPrint(arena, "{s} {s}", .{ branch_icon, name }) catch return null;
     spans.append(arena, .{ .style = .{ .bold = true, .color = .magenta }, .text = branch }) catch return null;
 
-    if (findGitDir(io, arena, env.cwd)) |git_dir| {
-        info.stashes = stashCount(io, arena, git_dir);
+    if (git_dir) |dir| {
+        info.stashes = stashCount(io, arena, dir);
 
-        if (stateText(io, arena, git_dir)) |state| {
+        if (stateText(io, arena, dir)) |state| {
             spans.append(arena, .{ .text = " " }) catch return null;
             spans.append(arena, .{ .style = .{ .bold = true, .color = .yellow }, .text = state }) catch return null;
         }
@@ -66,6 +74,14 @@ pub fn run(io: Io, arena: Allocator, env: *const Env) ?[]const Span {
     }
 
     return spans.toOwnedSlice(arena) catch null;
+}
+
+/// Whether running git is worth a fork and an exec. The walk answers it in a
+/// handful of stat calls everywhere except under `$GIT_DIR`, which names a
+/// repository no walk from `cwd` can reach, so a set value falls through to git
+/// and lets it resolve the repository as it always did.
+fn worthAsking(git_dir: ?[]const u8, git_dir_env: []const u8) bool {
+    return git_dir != null or git_dir_env.len > 0;
 }
 
 /// Finds the repository's git directory by walking up from `cwd` and, for a
@@ -262,6 +278,21 @@ fn writeMarkers(w: *Writer, info: GitInfo) Writer.Error!void {
     }
 
     try w.writeByte(']');
+}
+
+test "git is asked only when a repository is in reach" {
+    // The ordinary case: the walk found the repository, so git has something to
+    // report and is worth starting.
+    try std.testing.expect(worthAsking("/w/.git", ""));
+
+    // Nothing above cwd is a repository and no `$GIT_DIR` overrides that, so the
+    // subprocess could only ever say the same. Running it anyway was most of
+    // what a render cost outside a repository.
+    try std.testing.expect(!worthAsking(null, ""));
+
+    // `$GIT_DIR` names a repository no walk from cwd can reach, so git resolves
+    // it and the segment appears as it did before the walk gated the call.
+    try std.testing.expect(worthAsking(null, "/elsewhere/.git"));
 }
 
 test "parses branch, ahead/behind, and changes" {

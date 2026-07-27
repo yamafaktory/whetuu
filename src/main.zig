@@ -136,6 +136,7 @@ fn runRender(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: 
         .user = environ.get("USER") orelse "",
         .path = environ.get("PATH") orelse "",
         .cache_home = environ.get("XDG_CACHE_HOME") orelse "",
+        .git_dir = environ.get("GIT_DIR") orelse "",
         .ssh = environ.get("SSH_CONNECTION") != null or environ.get("SSH_TTY") != null,
         .width = opts.width,
         .duration_ms = opts.duration_ms,
