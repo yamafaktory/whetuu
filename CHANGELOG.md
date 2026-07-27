@@ -3,6 +3,16 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.10 — 2026-07-27
+
+### Changed
+
+- Start git only when there is a repository to ask about
+- Read git status without taking the index lock
+- Render the status line with one task instead of two
+- Build only the process state the status line needs
+- Retime the performance table
+
 ## v0.1.9 — 2026-07-26
 
 ### Changed
