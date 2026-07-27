@@ -67,9 +67,9 @@ performance cores on an otherwise idle machine:
 
 | Directory | Render | For comparison |
 |---|---|---|
-| No repo, no toolchain | **2.3 ms** ± 0.7 | — |
-| Zig repo, 35 files | **3.0 ms** ± 0.9 | `zig version` alone: 3.1 ms |
-| Monorepo, 8259 files | **20.2 ms** ± 2.5 | `git status` alone: 19.3 ms |
+| No repo, no toolchain | **1.0 ms** ± 0.2 | — |
+| Zig repo, 49 files | **2.8 ms** ± 0.4 | `zig version` alone: 3.5 ms |
+| Monorepo, 10 000 files | **11.0 ms** ± 1.8 | `git status` alone: 10.9 ms |
 
 Two things do most of the work. The probes overlap, so a render costs about what
 the slowest one costs rather than the sum of all of them. In the monorepo the
@@ -112,8 +112,8 @@ take, and it never writes the index back once per command forever.
 
 In a large repository, almost all of that time is `git status`, and most of that
 is the scan for untracked files. Speeding it up is git's job, not whetuu's.
-Turning on git's untracked cache cut `git status` from 13.5 ms to 5.7 ms on a
-test repository of 8000 files:
+Turning on git's untracked cache cut `git status` from 10.6 ms to 6.7 ms on the
+10 000 file repository above:
 
 ```sh
 git config core.untrackedCache true
@@ -143,9 +143,8 @@ whetuu reads your repository and prints a line. Here is what that involves.
   and nothing else. Delete it whenever you like.
 - **Two subprocesses, both bounded.** `git --no-optional-locks status
   --porcelain=2 --branch -z`, and the version command of the detected toolchain
-  (`zig version`,
-  `node --version`, …). Neither runs outside a repository or a project. Nothing
-  else is executed.
+  (`zig version`, `node --version`, …). Neither runs outside a repository or a
+  project. Nothing else is executed.
 - **The history store is `0600`**, set again on every append. Command lines
   routinely contain paths and secrets. The store lives at
   `~/.local/share/whetuu/history`, or under `$XDG_DATA_HOME` when that is set.
