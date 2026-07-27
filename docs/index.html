@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>whetū — an opinionated, zero-config status line and history picker written in Zig</title>
-<meta name="description" content="A single compiled binary that renders one curated status line for fish, bash and zsh, and binds the up arrow to its own history picker. Every module runs at once via std.Io, so a render costs about what its slowest probe costs.">
+<meta name="description" content="A single compiled binary that renders one curated status line for fish, bash and zsh, and binds the up arrow to its own history picker. The slowest module runs as a task via std.Io while the rest run alongside it, so a render costs about what its slowest probe costs.">
 <link rel="canonical" href="https://yamafaktory.github.io/whetuu/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://yamafaktory.github.io/whetuu/">
@@ -592,7 +592,7 @@ footer p { margin: 0 0 0.4rem; }
 <section class="wrap" id="performance">
   <p class="eyebrow">~/performance</p>
   <h2>Renders in about 2 ms</h2>
-  <p>A status line runs before every command, which makes it the one thing in your shell that has to be quick. Every module that reads the disk runs at the same time via <code>std.Io</code>, so a render takes about as long as its slowest probe rather than the sum of them all.</p>
+  <p>A status line runs before every command, which makes it the one thing in your shell that has to be quick. The slowest module runs as a task via <code>std.Io</code> while the rest run alongside it, so a render takes about as long as its slowest probe rather than the sum of them all.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Directory</th><th>Render</th><th>For comparison</th></tr></thead>

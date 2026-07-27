@@ -5,8 +5,10 @@ An opinionated, zero-config, async status line and history picker
 The binary is installed as the ASCII command `whetuu` (whetū is Māori for "star").
 
 The status line format and module set are hardcoded — there is intentionally no
-config file. A single compiled binary renders the whole line by running every module
-concurrently via `std.Io` (`Io.async` → `Future`, backed by `Io.Threaded`).
+config file. A single compiled binary renders the whole line, spawning its slowest
+module as a task via `std.Io` (`Io.async` → `Future`, backed by `Io.Threaded`) and
+running the rest alongside it. A thread costs more than most of these modules do,
+so only the one worth overlapping gets one.
 
 ## Working approach
 

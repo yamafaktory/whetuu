@@ -27,9 +27,9 @@ it falls on the second syllable. The ASCII name doubles the `u` to write that
 same long vowel.
 
 There is nothing to configure. One compiled binary renders one curated status
-line, the same for everyone. Every module that reads the disk runs at the same
-time via `std.Io`, so a render costs about what its slowest probe costs. See
-[Performance](#performance).
+line, the same for everyone. The slowest module runs as a task via `std.Io`
+while the rest run alongside it, so a render costs about what its slowest probe
+costs. See [Performance](#performance).
 
 > **Needs a [Nerd Font](https://www.nerdfonts.com/).** whetuu draws the git
 > branch, the language logos and the star with Nerd Font glyphs.

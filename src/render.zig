@@ -1,7 +1,7 @@
-//! Async render orchestrator. Spawns every segment module concurrently via
-//! `Io.async`, then awaits them in display order so the output is deterministic
-//! even though the work overlaps. The character is pure and is rendered
-//! synchronously after the segment line.
+//! Async render orchestrator. Spawns the slowest segment module via `Io.async`
+//! and runs the rest on the main thread while it is in flight, so the output is
+//! deterministic even though the work overlaps. The character is pure and is
+//! rendered synchronously after the segment line.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -22,24 +22,26 @@ const user_host = @import("module_user_host.zig");
 /// breathes between the colored segments on either side.
 const separator: Span = .{ .style = .{ .color = .bright_black }, .text = " · " };
 
-/// Renders the full status line to `w`. All modules are spawned before any is
-/// awaited, so their I/O overlaps; awaiting in display order keeps layout
-/// stable. The language module runs detection exactly once — its result also
-/// tints the character, which is pure and rendered synchronously after
-/// the segment line.
+/// Renders the full status line to `w`. Git is spawned before anything else
+/// runs, so its I/O overlaps every other module; writing in display order keeps
+/// layout stable whatever finishes first. The language module runs detection
+/// exactly once — its result also tints the character, which is pure and
+/// rendered synchronously after the segment line.
 pub fn render(io: Io, arena: Allocator, env: *const Env, w: *Writer) Writer.Error!void {
+    // Git is the only module worth a task. It is far and away the slowest, and
+    // the main thread has nothing else to do but wait for it, so everything
+    // else runs here rather than paying to start a second thread — a thread
+    // costs more than the language module it would carry.
     var git_future = io.async(git.run, .{ io, arena, env });
-    var language_future = io.async(language.run, .{ io, arena, env });
 
-    // Only git and language touch the filesystem, so only they are worth a
-    // task. The rest are pure and run inline while those two overlap —
-    // spawning them costs far more than the work they do.
     var wrote_any = false;
     try writeSegment(w, env.shell, user_host.run(arena, env), &wrote_any);
     try writeSegment(w, env.shell, directory.run(io, arena, env), &wrote_any);
-    try writeSegment(w, env.shell, git_future.await(io), &wrote_any);
 
-    const lang_result = language_future.await(io);
+    // Detected before the wait so it overlaps git, written after it so the
+    // segments stay in display order.
+    const lang_result = language.run(io, arena, env);
+    try writeSegment(w, env.shell, git_future.await(io), &wrote_any);
     try writeSegment(w, env.shell, lang_result.spans, &wrote_any);
     try writeSegment(w, env.shell, cmd_duration.run(io, arena, env), &wrote_any);
 
@@ -60,6 +62,52 @@ fn writeSegment(w: *Writer, shell: Env.Shell, spans_opt: ?[]const Span, wrote_an
     if (wrote_any.*) try style.write(w, shell, separator.style, separator.text);
     for (spans) |span| try style.write(w, shell, span.style, span.text);
     wrote_any.* = true;
+}
+
+test "segments keep display order however the work overlaps" {
+    var threaded: Io.Threaded = .init(std.testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "build.zig", .data = "" });
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const cwd = path_buf[0..try tmp.dir.realPathFile(io, ".", &path_buf)];
+
+    const env: Env = .{
+        .shell = .fish,
+        .cwd = cwd,
+        .home = "/nonexistent-home",
+        .width = 200,
+        .duration_ms = 0,
+        .exit_status = 0,
+    };
+
+    var buf: [4096]u8 = undefined;
+    var w: Writer = .fixed(&buf);
+    try render(io, arena.allocator(), &env, &w);
+    const out = w.buffered();
+
+    // Language is detected before git is awaited so the two overlap, and it is a
+    // separate module from the one that writes it. Detecting early must not
+    // write early: the directory still comes first, and the language logo after
+    // whatever git had to say.
+    const dir_at = std.mem.indexOf(u8, out, std.fs.path.basename(cwd)).?;
+    const lang_at = std.mem.indexOf(u8, out, language.detect(io, cwd).?.icon).?;
+    try std.testing.expect(dir_at < lang_at);
+
+    // A checkout puts the temporary directory inside a repository, so the git
+    // segment sits between the two. A build from a tarball has no repository and
+    // no segment, and the order above is the whole assertion.
+    if (std.mem.indexOf(u8, out, style.icon.branch)) |git_at| {
+        try std.testing.expect(dir_at < git_at and git_at < lang_at);
+    }
 }
 
 test "render emits the directory, a newline, then the trailing character" {
