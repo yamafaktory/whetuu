@@ -165,8 +165,13 @@ fn gitPathExists(io: Io, arena: Allocator, git_dir: []const u8, sub: []const u8)
 
 /// Runs git and returns its stdout, or null on any failure (not a repo, missing
 /// git, timeout). Uses `-C cwd` to be explicit about which tree is inspected.
+///
+/// `--no-optional-locks` keeps a status line out of the way of the shell it
+/// draws for. Without it git refreshes the index on every render, which takes
+/// `index.lock` and writes it back — a lock a git command running in another
+/// terminal then fails to take, and a write to disk once per command forever.
 fn gitStatus(io: Io, arena: Allocator, cwd: []const u8) ?[]const u8 {
-    const argv = &[_][]const u8{ "git", "-C", cwd, "status", "--porcelain=2", "--branch", "-z" };
+    const argv = &[_][]const u8{ "git", "--no-optional-locks", "-C", cwd, "status", "--porcelain=2", "--branch", "-z" };
     const timeout: Io.Timeout = .{ .duration = .{ .raw = Io.Duration.fromMilliseconds(timeout_ms), .clock = .awake } };
 
     const result = std.process.run(arena, io, .{ .argv = argv, .timeout = timeout }) catch return null;

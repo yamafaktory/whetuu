@@ -105,6 +105,11 @@ time, so the worst case is the larger of the two, not the sum. Given a `git`
 that hangs for 30 s, the status line still returns in 257 ms. It simply drops
 the git segment.
 
+**And a status line stays out of git's way.** The call passes
+`--no-optional-locks`, so git reads the index without refreshing it. It never
+takes `index.lock`, which a `git commit` in another terminal would then fail to
+take, and it never writes the index back once per command forever.
+
 In a large repository, almost all of that time is `git status`, and most of that
 is the scan for untracked files. Speeding it up is git's job, not whetuu's.
 Turning on git's untracked cache cut `git status` from 13.5 ms to 5.7 ms on a
@@ -136,8 +141,9 @@ whetuu reads your repository and prints a line. Here is what that involves.
   store. The other is a version cache at `~/.cache/whetuu/versions`, or under
   `$XDG_CACHE_HOME` when that is set. The cache holds toolchain version strings
   and nothing else. Delete it whenever you like.
-- **Two subprocesses, both bounded.** `git status --porcelain=2 --branch -z`,
-  and the version command of the detected toolchain (`zig version`,
+- **Two subprocesses, both bounded.** `git --no-optional-locks status
+  --porcelain=2 --branch -z`, and the version command of the detected toolchain
+  (`zig version`,
   `node --version`, …). Neither runs outside a repository or a project. Nothing
   else is executed.
 - **The history store is `0600`**, set again on every append. Command lines
