@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Environ = std.process.Environ;
 const Io = std.Io;
 
 const build_options = @import("build_options");
@@ -24,11 +25,24 @@ const version_cache = @import("version_cache.zig");
 /// reported empty rather than overrunning the buffer.
 const max_path_bytes = 4096;
 
-pub fn main(init: std.process.Init) !void {
-    const arena = init.arena.allocator();
-    const io = init.io;
-    const args = try init.minimal.args.toSlice(arena);
+/// Takes `Init.Minimal` and builds the two things it actually needs, rather
+/// than `Init`, which hashes the whole environment into a map before `main`
+/// runs. whetuu reads six variables and never enumerates them, so that map cost
+/// about 125 µs of every render and of every `history add` — one of each per
+/// command — to answer six lookups a linear scan answers for nothing.
+pub fn main(init: std.process.Init.Minimal) !void {
+    var threaded: Io.Threaded = .init(std.heap.smp_allocator, .{
+        .argv0 = .init(init.args),
+        .environ = init.environ,
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
 
+    var arena_instance: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+    defer arena_instance.deinit();
+    const arena = arena_instance.allocator();
+
+    const args = try init.args.toSlice(arena);
     if (args.len < 2) return usage(io);
 
     const sub = args[1];
@@ -42,18 +56,25 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (std.mem.eql(u8, sub, "render")) {
-        return runRender(io, arena, init.environ_map, args[2..]);
+        return runRender(io, arena, init.environ, args[2..]);
     }
 
     if (std.mem.eql(u8, sub, "history")) {
-        return runHistory(io, arena, init.environ_map, args[2..]);
+        return runHistory(io, arena, init.environ, args[2..]);
     }
 
     if (std.mem.eql(u8, sub, "paths")) {
-        return runPaths(io, arena, init.environ_map);
+        return runPaths(io, arena, init.environ);
     }
 
     return unknownSubcommand(io, arena, sub);
+}
+
+/// One environment variable as a plain slice, empty when unset. Reads the block
+/// the kernel handed the process, which is why nothing here needs a map. The
+/// posix lookup is the whole story: whetuu ships for linux and macos only.
+fn envOrEmpty(environ: Environ, key: []const u8) []const u8 {
+    return environ.getPosix(key) orelse "";
 }
 
 /// One line and a failing status for a subcommand that does not exist, rather
@@ -86,10 +107,10 @@ fn unknownSubcommand(io: Io, arena: Allocator, sub: []const u8) !void {
 /// Both follow the XDG base directory spec, so neither is under the directory
 /// the installer put the binary in: removing whetuu should not remove the
 /// history you built up with it.
-fn runPaths(io: Io, arena: Allocator, environ: *std.process.Environ.Map) !void {
-    const home = environ.get("HOME") orelse "";
-    const store = try history.storePath(arena, environ.get("XDG_DATA_HOME") orelse "", home);
-    const cache = try version_cache.path(arena, environ.get("XDG_CACHE_HOME") orelse "", home);
+fn runPaths(io: Io, arena: Allocator, environ: Environ) !void {
+    const home = envOrEmpty(environ, "HOME");
+    const store = try history.storePath(arena, envOrEmpty(environ, "XDG_DATA_HOME"), home);
+    const cache = try version_cache.path(arena, envOrEmpty(environ, "XDG_CACHE_HOME"), home);
 
     var buf: [1024]u8 = undefined;
     var fw = Io.File.stdout().writer(io, &buf);
@@ -123,7 +144,7 @@ fn writePath(io: Io, w: *std.Io.Writer, label: []const u8, path: ?[]const u8) !v
 }
 
 /// Builds the `Env` from flags and environment, then renders to stdout.
-fn runRender(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: []const [:0]const u8) !void {
+fn runRender(io: Io, arena: Allocator, environ: Environ, args: []const [:0]const u8) !void {
     const opts = try cli.parseRender(args);
 
     var cwd_buf: [max_path_bytes]u8 = undefined;
@@ -132,12 +153,12 @@ fn runRender(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: 
     const env: Env = .{
         .shell = opts.shell,
         .cwd = cwd_buf[0..cwd_len],
-        .home = environ.get("HOME") orelse "",
-        .user = environ.get("USER") orelse "",
-        .path = environ.get("PATH") orelse "",
-        .cache_home = environ.get("XDG_CACHE_HOME") orelse "",
-        .git_dir = environ.get("GIT_DIR") orelse "",
-        .ssh = environ.get("SSH_CONNECTION") != null or environ.get("SSH_TTY") != null,
+        .home = envOrEmpty(environ, "HOME"),
+        .user = envOrEmpty(environ, "USER"),
+        .path = envOrEmpty(environ, "PATH"),
+        .cache_home = envOrEmpty(environ, "XDG_CACHE_HOME"),
+        .git_dir = envOrEmpty(environ, "GIT_DIR"),
+        .ssh = environ.getPosix("SSH_CONNECTION") != null or environ.getPosix("SSH_TTY") != null,
         .width = opts.width,
         .duration_ms = opts.duration_ms,
         .exit_status = opts.exit_status,
@@ -157,9 +178,9 @@ fn runRender(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: 
 /// the shell to place on the command line. `--last` is the command that just
 /// failed, shown marked at the top and never stored, so the thing that broke
 /// can be recalled without cluttering the store.
-fn runHistory(io: Io, arena: Allocator, environ: *std.process.Environ.Map, args: []const [:0]const u8) !void {
-    const xdg = environ.get("XDG_DATA_HOME") orelse "";
-    const home = environ.get("HOME") orelse "";
+fn runHistory(io: Io, arena: Allocator, environ: Environ, args: []const [:0]const u8) !void {
+    const xdg = envOrEmpty(environ, "XDG_DATA_HOME");
+    const home = envOrEmpty(environ, "HOME");
     const path = (try history.storePath(arena, xdg, home)) orelse return;
 
     // The process inherits the shell's working directory, so recording and
