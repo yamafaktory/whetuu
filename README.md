@@ -412,8 +412,10 @@ you just ran. Nothing you run often can push it off that row.
 
 Searching stays fast on a store of any size. Commands are scored several at a
 time using the vector instructions your processor already has, and a search is
-narrowed by which characters a command contains before any of it is scored. On
-a full window a keystroke costs a couple of milliseconds.
+narrowed by which characters a command contains before any of it is scored.
+Against a full window of about 50 000 commands a keystroke costs 1 to 3 ms on
+the machine the [Performance](#performance) numbers come from, which is roughly
+a fifth of what the same code costs scoring one command at a time.
 
 Commands are syntax highlighted. The program name, flags, paths, variables,
 quoted strings and operators each get their own color, so a long row reads at a
