@@ -4,8 +4,9 @@
 //! never depends on (or litters) the current working directory. Each line is
 //! `<unix-seconds>\t<escaped directory>\t<escaped command>`; the directory the
 //! command ran in is recorded so the picker can scope the list to it. The read
-//! side deduplicates per (directory, command) — most-recent occurrence wins —
-//! and returns entries newest-first to feed the picker.
+//! side deduplicates per (directory, command) — most-recent occurrence wins,
+//! carrying a count of the occurrences behind it — and returns entries
+//! newest-first to feed the picker.
 //!
 //! Appends are unbounded; reads are not. A load takes the last `read_budget`
 //! bytes, so opening the picker costs the same on a store of any size. The file
@@ -32,6 +33,11 @@ pub const Entry = struct {
     command: []const u8,
     cwd: []const u8 = "",
     timestamp: i64,
+    /// How many times the command was run in that directory. Counted over the
+    /// window a load reads rather than over the whole file, so it is how often
+    /// you run something lately, which is the only sense in which it is worth
+    /// knowing. The picker uses it to break ties between equally good matches.
+    count: u32 = 1,
     /// A display-only marker for the ephemeral command that just failed, which
     /// the picker shows at the top and marks but never stores. The read path
     /// never sets it, so a loaded entry is always false.
@@ -122,13 +128,16 @@ pub fn load(io: Io, arena: Allocator, path: []const u8) ![]const Entry {
 }
 
 /// Feeds whole records to the deduper, newest first, keeping the first sighting
-/// of each pair.
+/// of each pair and counting the ones behind it.
 fn collect(arena: Allocator, bytes: []const u8, unique: *Deduper, out: *std.ArrayList(Entry)) !void {
     var it = std.mem.splitBackwardsScalar(u8, bytes, '\n');
     while (it.next()) |line| {
         if (line.len == 0) continue;
         const entry = try parse(arena, line);
-        if (unique.seen(entry)) continue;
+        if (unique.slot(entry, out.items.len)) |at| {
+            out.items[at].count +|= 1;
+            continue;
+        }
         out.appendAssumeCapacity(entry);
     }
 }
@@ -188,14 +197,15 @@ test "a command that is not text never reaches the store" {
     try std.testing.expectEqualStrings("git commit -m 'plan — done'", stored[1].command);
 }
 
-/// Remembers which (directory, command) pairs a load has already offered, so
-/// only the most recent occurrence of each survives.
+/// Remembers which (directory, command) pairs a load has already offered and
+/// where each one landed, so only the most recent occurrence of a pair survives
+/// and the ones behind it are counted onto it.
 ///
 /// The pair is hashed where it lies rather than joined into one key first.
 /// Joining cost an allocation and a copy for every line in the store, on the
 /// path that runs before the picker can draw anything.
 const Deduper = struct {
-    const Map = std.HashMap(Entry, void, Context, std.hash_map.default_max_load_percentage);
+    const Map = std.HashMap(Entry, u32, Context, std.hash_map.default_max_load_percentage);
 
     const Context = struct {
         pub fn hash(_: Context, entry: Entry) u64 {
@@ -219,18 +229,24 @@ const Deduper = struct {
         return .{ .map = .init(arena) };
     }
 
-    /// Whether this pair has been offered already, recording it when not.
-    /// Assumes the caller sized the map for every line it will be shown.
-    fn seen(dedup: *Deduper, entry: Entry) bool {
-        return dedup.map.getOrPutAssumeCapacity(entry).found_existing;
+    /// Where this pair already sits in the output, or null when it is new — in
+    /// which case it is recorded as taking the slot at `next`. Assumes the
+    /// caller sized the map for every line it will be shown.
+    fn slot(dedup: *Deduper, entry: Entry, next: usize) ?u32 {
+        const gop = dedup.map.getOrPutAssumeCapacity(entry);
+        if (gop.found_existing) return gop.value_ptr.*;
+
+        gop.value_ptr.* = @intCast(next);
+        return null;
     }
 };
 
 /// Splits raw file bytes into unique (directory, command) entries, most-recent
 /// occurrence winning, ordered newest first. Walks lines back-to-front so the
 /// first sighting of a pair is its latest one (and carries that occurrence's
-/// timestamp). The same command run in two directories stays two entries, so
-/// each directory keeps its own recency.
+/// timestamp, with every occurrence behind it counted onto it). The same
+/// command run in two directories stays two entries, so each directory keeps
+/// its own recency and its own count.
 fn dedupe(arena: Allocator, bytes: []const u8) ![]const Entry {
     // One line is at most one entry, so counting them sizes both containers
     // exactly once. Letting them grow instead costs more than half the time
@@ -344,6 +360,30 @@ test "dedupe keeps the most recent occurrence and its timestamp, newest first" {
     try std.testing.expectEqualStrings("a", got[1].command);
     try std.testing.expectEqual(@as(i64, 30), got[1].timestamp);
     try std.testing.expectEqualStrings("b", got[2].command);
+}
+
+test "dedupe counts how often a command was run" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const got = try dedupe(arena.allocator(), "10\t/a\tls\n20\t/a\tzig build\n30\t/a\tzig build\n40\t/a\tzig build\n");
+    try std.testing.expectEqual(@as(usize, 2), got.len);
+    try std.testing.expectEqualStrings("zig build", got[0].command);
+    try std.testing.expectEqual(@as(u32, 3), got[0].count);
+    try std.testing.expectEqualStrings("ls", got[1].command);
+    try std.testing.expectEqual(@as(u32, 1), got[1].count);
+}
+
+test "a command run in two directories counts separately in each" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const got = try dedupe(arena.allocator(), "10\t/a\tzig build\n20\t/b\tzig build\n30\t/b\tzig build\n");
+    try std.testing.expectEqual(@as(usize, 2), got.len);
+    try std.testing.expectEqualStrings("/b", got[0].cwd);
+    try std.testing.expectEqual(@as(u32, 2), got[0].count);
+    try std.testing.expectEqualStrings("/a", got[1].cwd);
+    try std.testing.expectEqual(@as(u32, 1), got[1].count);
 }
 
 test "dedupe reads legacy lines without a timestamp" {

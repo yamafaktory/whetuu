@@ -291,6 +291,7 @@ test {
     _ = @import("module_language.zig");
     _ = @import("module_user_host.zig");
     _ = @import("render.zig");
+    _ = @import("search.zig");
     _ = @import("style.zig");
     _ = @import("time_ago.zig");
     _ = @import("version_cache.zig");

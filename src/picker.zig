@@ -3,7 +3,10 @@
 //! of stdio, so the chosen command is returned to the caller (and thence to
 //! stdout) while the UI never touches the pipe the shell is capturing. The list
 //! is bottom-anchored: the most recent command sits just above the search line,
-//! older commands climb upward. It opens scoped to the current directory's
+//! older commands climb upward. Typing narrows the list by fuzzy match and
+//! reorders it best-first, so the closest match takes that same bottom row —
+//! see `search.zig` for what makes one match better than another. It opens
+//! scoped to the current directory's
 //! history (falling back to all history when the directory has none) and
 //! Ctrl+G toggles the scope; a bar at the top of the screen names both scopes
 //! with the active one highlighted (`~/dev/whetuu | all`). Rows are syntax
@@ -19,6 +22,7 @@ const posix = std.posix;
 const Entry = @import("history.zig").Entry;
 const collapseHome = @import("module_directory.zig").collapseHome;
 const highlight = @import("highlight.zig");
+const search = @import("search.zig");
 const style = @import("style.zig");
 const time_ago = @import("time_ago.zig");
 
@@ -101,9 +105,10 @@ pub const Options = struct {
 ///
 /// Three arenas keep an idle picker from growing or from touching the terminal
 /// for no reason. The frame buffer comes from a scratch arena reset every
-/// iteration. Scope selection and query matching each get their own arena and
+/// iteration. Scope selection and query ranking each get their own arena and
 /// rerun only when their own input moves, so a tick filters nothing and a
-/// keystroke never re-hashes the whole store to dedupe it again. The last frame
+/// keystroke never re-hashes the whole store to dedupe it again nor lays it out
+/// for the matcher again. The last frame
 /// written is kept on `arena` and compared against the next one, so a redraw
 /// that would change nothing is never sent. The terminal is always restored on
 /// exit.
@@ -132,6 +137,7 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
     var base: usize = 0;
     var input: Input = .{};
     var in_scope: []const Entry = &.{};
+    var corpus: ?search.Corpus = null;
     var shown: []const Entry = &.{};
     var rescope = true;
     var refilter = true;
@@ -148,11 +154,20 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
         if (rescope) {
             _ = scope_arena.reset(.retain_capacity);
             in_scope = scoped(scope_arena.allocator(), items, scope, opts.cwd) catch items;
+            corpus = null;
             rescope = false;
         }
         if (refilter) {
             _ = list_arena.reset(.retain_capacity);
-            shown = matching(list_arena.allocator(), in_scope, query.items) catch in_scope;
+            shown = in_scope;
+            if (isFilter(query.items)) {
+                // Laying the scope out for the matcher costs about what reading
+                // the store costs, and a list nobody has typed at is not
+                // ranked, so it is built on the first keystroke rather than on
+                // open. It then lasts until the scope changes.
+                if (corpus == null) corpus = prepare(scope_arena.allocator(), in_scope) catch .empty;
+                shown = ranked(list_arena.allocator(), in_scope, corpus.?, query.items, now) catch in_scope;
+            }
             refilter = false;
         }
         if (selected >= shown.len) selected = if (shown.len == 0) 0 else shown.len - 1;
@@ -255,21 +270,26 @@ fn popCodepoint(query: *std.ArrayList(u8)) bool {
 
 /// Returns the entries `scope` admits, order preserved. The `.dir` scope keeps
 /// only entries recorded in `cwd`; the `.all` scope collapses the same command
-/// run in several directories to its newest occurrence.
+/// run in several directories to its newest occurrence, adding up how often
+/// each directory ran it so the collapsed entry carries the whole total.
 ///
 /// No query is involved, which is the point: hashing every command to dedupe it
 /// costs several times what matching a query does, and the result cannot change
 /// between keystrokes. The picker runs this once per scope and narrows the
-/// result with `matching`.
+/// result with `ranked`.
 fn scoped(arena: Allocator, items: []const Entry, scope: Scope, cwd: []const u8) ![]const Entry {
-    var seen: std.StringHashMap(void) = .init(arena);
+    var seen: std.StringHashMap(u32) = .init(arena);
     var out: std.ArrayList(Entry) = .empty;
     for (items) |item| {
         switch (scope) {
             .dir => if (!std.mem.eql(u8, item.cwd, cwd)) continue,
             .all => {
-                if (seen.contains(item.command)) continue;
-                try seen.put(item.command, {});
+                const gop = try seen.getOrPut(item.command);
+                if (gop.found_existing) {
+                    out.items[gop.value_ptr.*].count +|= item.count;
+                    continue;
+                }
+                gop.value_ptr.* = @intCast(out.items.len);
             },
         }
 
@@ -279,16 +299,74 @@ fn scoped(arena: Allocator, items: []const Entry, scope: Scope, cwd: []const u8)
     return out.toOwnedSlice(arena);
 }
 
-/// Returns the entries of `items` matching `query`, order preserved. Each
-/// whitespace-separated token in the query must appear (case-insensitive) in
-/// the command, so `git pu` narrows to commands containing both.
-fn matching(arena: Allocator, items: []const Entry, query: []const u8) ![]const Entry {
-    var out: std.ArrayList(Entry) = .empty;
-    for (items) |item| {
-        if (matches(item.command, query)) try out.append(arena, item);
+/// Lays the scope's commands out for the fuzzy matcher. Run once per scope
+/// rather than once per keystroke, because the layout is what makes a keystroke
+/// cheap and nothing about it depends on what was typed. Held back until the
+/// first keystroke, since a list nobody has typed at is never ranked.
+fn prepare(arena: Allocator, items: []const Entry) !search.Corpus {
+    const commands = try arena.alloc([]const u8, items.len);
+    for (items, commands) |item, *command| command.* = item.command;
+    return search.Corpus.prepare(arena, commands);
+}
+
+/// Whether the query narrows anything. Blank text is not a filter, so the list
+/// stands as it came and nothing is laid out to match against.
+fn isFilter(query: []const u8) bool {
+    return std.mem.trim(u8, query, " \t").len > 0;
+}
+
+/// One scored entry, with everything the ordering needs so the comparison
+/// itself stays a plain read of four fields.
+const Ranked = struct {
+    entry: Entry,
+    score: u16,
+    frecency: u32,
+    /// Position in the unranked list, which is recency order. Breaks the last
+    /// tie so the order is total and a redraw never reshuffles equal rows.
+    at: usize,
+};
+
+/// Returns the entries of `items` that `query` matches, best match first.
+///
+/// Rank is the match score above all: a command the query fits well is shown
+/// before one it merely fits, however long ago it ran. Frecency breaks ties
+/// between equally good matches, and recency breaks what that leaves.
+///
+/// An empty query ranks nothing and returns `items` as they came, which is
+/// newest first. That is what keeps the up arrow feeling like an up arrow —
+/// opening the picker puts the last command run under the selection, and no
+/// amount of running something often moves it.
+fn ranked(arena: Allocator, items: []const Entry, corpus: search.Corpus, query: []const u8, now: i64) ![]const Entry {
+    if (!isFilter(query) or corpus.len != items.len) return items;
+
+    const scores = try arena.alloc(u16, items.len);
+    try corpus.scoreAll(arena, query, scores);
+
+    var hits: std.ArrayList(Ranked) = .empty;
+    for (items, scores, 0..) |item, score, at| {
+        if (score == 0) continue;
+        try hits.append(arena, .{
+            .entry = item,
+            .score = score,
+            .frecency = search.frecency(item.count, now - item.timestamp),
+            .at = at,
+        });
     }
 
-    return out.toOwnedSlice(arena);
+    std.mem.sortUnstable(Ranked, hits.items, {}, better);
+
+    const out = try arena.alloc(Entry, hits.items.len);
+    for (hits.items, out) |hit, *slot| slot.* = hit.entry;
+    return out;
+}
+
+/// Whether `a` belongs above `b`, which in a bottom-anchored list means nearer
+/// the cursor.
+fn better(_: void, a: Ranked, b: Ranked) bool {
+    if (a.score != b.score) return a.score > b.score;
+    if (a.frecency != b.frecency) return a.frecency > b.frecency;
+    if (a.entry.timestamp != b.entry.timestamp) return a.entry.timestamp > b.entry.timestamp;
+    return a.at < b.at;
 }
 
 /// Builds the bar shown at the top of the screen — both scopes with the
@@ -337,16 +415,6 @@ fn tail(text: []const u8, cols: usize) []const u8 {
     return text[start..];
 }
 
-/// True when every token in `query` is a case-insensitive substring of `command`.
-fn matches(command: []const u8, query: []const u8) bool {
-    var it = std.mem.tokenizeScalar(u8, query, ' ');
-    while (it.next()) |token| {
-        if (!containsIgnoreCase(command, token)) return false;
-    }
-
-    return true;
-}
-
 /// The command Enter falls back to when no entry matches: the query text the
 /// user typed (e.g. a tabbed entry plus new flags), stripped of the padding
 /// spaces, or null when the query is effectively empty.
@@ -367,19 +435,6 @@ fn queryFallback(query: []const u8) ?[]const u8 {
 fn confirm(editing: bool, query: []const u8, shown: []const Entry, selected: usize) ?[]const u8 {
     if (editing or shown.len == 0) return queryFallback(query);
     return shown[selected].command;
-}
-
-/// Case-insensitive substring test. An empty needle always matches.
-fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
-    if (needle.len == 0) return true;
-    if (needle.len > haystack.len) return false;
-
-    var i: usize = 0;
-    while (i + needle.len <= haystack.len) : (i += 1) {
-        if (std.ascii.eqlIgnoreCase(haystack[i .. i + needle.len], needle)) return true;
-    }
-
-    return false;
 }
 
 /// Switches the terminal to raw mode: no line buffering, no echo, and signals
@@ -956,11 +1011,17 @@ fn writeAll(io: Io, tty: Io.File, bytes: []const u8) void {
     tty.writeStreamingAll(io, bytes) catch {};
 }
 
-test "matches requires every query token" {
-    try std.testing.expect(matches("git push origin", "git pu"));
-    try std.testing.expect(matches("git push origin", "PUSH"));
-    try std.testing.expect(!matches("git push origin", "git pull"));
-    try std.testing.expect(matches("anything", ""));
+/// The list the picker would show for `query`: scoped, then ranked, exactly as
+/// `pick` builds it.
+fn shownFor(arena: Allocator, items: []const Entry, scope: Scope, cwd: []const u8, query: []const u8, now: i64) ![]const Entry {
+    const in_scope = try scoped(arena, items, scope, cwd);
+    return ranked(arena, in_scope, try prepare(arena, in_scope), query, now);
+}
+
+/// The commands of a shown list, so a test reads as the rows it expects.
+fn expectShown(got: []const Entry, expected: []const []const u8) !void {
+    try std.testing.expectEqual(expected.len, got.len);
+    for (expected, got) |want, entry| try std.testing.expectEqualStrings(want, entry.command);
 }
 
 test "appendRightAligned pads on the left so unit letters line up" {
@@ -976,7 +1037,7 @@ test "appendRightAligned pads on the left so unit letters line up" {
     try std.testing.expectEqualStrings("11mo", f.items);
 }
 
-test "filter narrows to matching entries, order preserved" {
+test "a query narrows the list to what it matches" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -986,10 +1047,74 @@ test "filter narrows to matching entries, order preserved" {
         .{ .command = "git pull", .timestamp = 1 },
     };
     const a = arena.allocator();
-    const got = try matching(a, try scoped(a, &items, .all, ""), "git");
-    try std.testing.expectEqual(@as(usize, 2), got.len);
+    try expectShown(try shownFor(a, &items, .all, "", "git", 10), &.{ "git push", "git pull" });
+}
+
+test "a query matches loosely, not only as a substring" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const items = [_]Entry{
+        .{ .command = "git commit --amend", .timestamp = 2 },
+        .{ .command = "cargo test", .timestamp = 1 },
+    };
+    const a = arena.allocator();
+    try expectShown(try shownFor(a, &items, .all, "", "gca", 10), &.{"git commit --amend"});
+}
+
+test "the best match comes first, however long ago it ran" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // The newest entry matches the query only by scattering it through the
+    // middle of a word. The oldest starts two words with it. Recency used to
+    // decide this outright, and typing the exact command left it at the top of
+    // a list of things that merely contained the same letters.
+    const items = [_]Entry{
+        .{ .command = "echo 'go past unit tests'", .timestamp = 300 },
+        .{ .command = "git push", .timestamp = 100 },
+    };
+    const a = arena.allocator();
+    const got = try shownFor(a, &items, .all, "", "gp", 400);
     try std.testing.expectEqualStrings("git push", got[0].command);
-    try std.testing.expectEqualStrings("git pull", got[1].command);
+}
+
+test "frecency breaks a tie between equally good matches" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Two commands the query fits identically well. The one run far more often
+    // wins, even though the other ran more recently.
+    const now: i64 = 1_000_000;
+    const items = [_]Entry{
+        .{ .command = "zig build once", .timestamp = now - 60, .count = 1 },
+        .{ .command = "zig build often", .timestamp = now - 120, .count = 40 },
+    };
+    const a = arena.allocator();
+    const got = try shownFor(a, &items, .all, "", "zig build", now);
+    try expectShown(got, &.{ "zig build often", "zig build once" });
+
+    // Run as rarely as the other and recency decides it again.
+    const rare = [_]Entry{
+        .{ .command = "zig build once", .timestamp = now - 60, .count = 1 },
+        .{ .command = "zig build often", .timestamp = now - 120, .count = 1 },
+    };
+    try expectShown(try shownFor(a, &rare, .all, "", "zig build", now), &.{ "zig build once", "zig build often" });
+}
+
+test "an empty query leaves the list in recency order" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Opening the picker has to put the last command run under the selection.
+    // Running something a hundred times does not move it up.
+    const items = [_]Entry{
+        .{ .command = "ls", .timestamp = 300, .count = 1 },
+        .{ .command = "zig build", .timestamp = 100, .count = 100 },
+    };
+    const a = arena.allocator();
+    try expectShown(try shownFor(a, &items, .all, "", "", 400), &.{ "ls", "zig build" });
+    try expectShown(try shownFor(a, &items, .all, "", "   ", 400), &.{ "ls", "zig build" });
 }
 
 test "dir scope keeps only the current directory's entries" {
@@ -1002,10 +1127,7 @@ test "dir scope keeps only the current directory's entries" {
         .{ .command = "ls", .cwd = "/a", .timestamp = 1 },
     };
     const a = arena.allocator();
-    const got = try matching(a, try scoped(a, &items, .dir, "/a"), "");
-    try std.testing.expectEqual(@as(usize, 2), got.len);
-    try std.testing.expectEqualStrings("zig build", got[0].command);
-    try std.testing.expectEqualStrings("ls", got[1].command);
+    try expectShown(try shownFor(a, &items, .dir, "/a", "", 10), &.{ "zig build", "ls" });
 }
 
 test "all scope collapses a command run in several directories to its newest" {
@@ -1013,13 +1135,16 @@ test "all scope collapses a command run in several directories to its newest" {
     defer arena.deinit();
 
     const items = [_]Entry{
-        .{ .command = "zig build", .cwd = "/a", .timestamp = 3 },
-        .{ .command = "zig build", .cwd = "/b", .timestamp = 2 },
+        .{ .command = "zig build", .cwd = "/a", .timestamp = 3, .count = 2 },
+        .{ .command = "zig build", .cwd = "/b", .timestamp = 2, .count = 5 },
     };
-    const a = arena.allocator();
-    const got = try matching(a, try scoped(a, &items, .all, ""), "");
+    const got = try scoped(arena.allocator(), &items, .all, "");
     try std.testing.expectEqual(@as(usize, 1), got.len);
     try std.testing.expectEqualStrings("/a", got[0].cwd);
+
+    // The collapsed entry carries every directory's runs, so a command you run
+    // everywhere is not outranked by one you only run here.
+    try std.testing.expectEqual(@as(u32, 7), got[0].count);
 }
 
 test "initialScope opens scoped only when the directory has history" {
@@ -1445,7 +1570,7 @@ test "Enter runs the edited query, not the entry Tab took it from" {
     // failure still matches every word left, so it is still shown and still
     // selected. Enter has to hand back the text, or it re-runs the typo.
     const fixed = "python3 -m http.server -d docs 8000 ";
-    try std.testing.expect(matches(typo.command, fixed));
+    try std.testing.expect(search.matches(typo.command, fixed));
     try std.testing.expectEqualStrings(good.command, confirm(true, fixed, &both, 0).?);
 
     // Editing down to nothing has nothing to run.

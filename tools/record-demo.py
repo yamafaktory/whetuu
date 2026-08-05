@@ -184,8 +184,10 @@ def main():
         os.write(fd, b"\x07")                   # Ctrl+G: back to this dir
         drain(2.0)
 
-        # Filter to a single entry, then Tab it into the search field and append
-        # a flag: once the text stops matching anything, Enter runs it as typed.
+        # Filter, which also ranks: the closest match takes the selected row and
+        # looser ones climb away from it. Then Tab it into the search field and
+        # append a flag, since once the text stops matching anything Enter runs
+        # it as typed.
         send("stat", 0.2)
         drain(2.2)
         os.write(fd, b"\t")                     # copy the selection to the query

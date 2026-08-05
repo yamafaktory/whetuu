@@ -341,6 +341,8 @@ Nothing is ever deleted from it. The picker reads the most recent few megabytes
 rather than the whole file, so it opens just as fast on a store built over years
 as on a fresh one. Everything you have run stays on disk either way, and on a
 store that large the commands past the window are ones you last ran years ago.
+How often you run a command is counted over that same window, so what breaks a
+tie between two equally good matches is how often you run it lately.
 
 Your shell's own history file is untouched. whetuu never reads, writes or
 truncates `~/.bash_history`, `~/.zsh_history` or fish's database. The two stores
@@ -369,7 +371,9 @@ run in this project. It falls back to all history when the directory has none
 yet. A bar at the top names both scopes and highlights the active one, like
 `~/dev/whetuu | all`.
 
-- **type to filter** — every word must match, ignoring case
+- **type to filter** — the letters have to appear in order, not next to each
+  other, so `gcm` finds `git commit -m`. Every word of the search must match,
+  ignoring case
 - **Backspace / Delete** — drop the last character of the search. The cursor
   never leaves the end of it, so the two keys do the same thing
 - **↑ / ↓** — move the selection, where ↑ goes further back in time
@@ -386,9 +390,30 @@ yet. A bar at the top names both scopes and highlights the active one, like
 The picker behaves the same in all three shells.
 
 The list grows upward from the bottom. The most recent command sits just above
-the search line and older ones climb from there. Each row is prefixed with how
-long ago it ran, like `5m`, `2h` or `3d`. The selected row is highlighted across
-the full width in the star purple of the status line.
+the search line and older ones climb from there. Type and the closest match
+takes that bottom row instead, with weaker ones climbing away from it. Each row
+is prefixed with how long ago it ran, like `5m`, `2h` or `3d`. The selected row
+is highlighted across the full width in the star purple of the status line.
+
+Matches are ranked by how well they fit what you typed. Letters found in a run,
+at the start of a word, or at the front of the command are worth more than the
+same letters found scattered through the middle. So `gcm` puts `git commit -m`
+above `git checkout main`, and both above a command that merely happens to
+contain a g, a c and an m.
+
+When two commands fit equally well, the one you run more often and more recently
+comes first. That is only ever a tiebreak. A command that fits what you typed
+better is always shown above one that fits it worse, however long ago you last
+ran it.
+
+An empty search is not ranked at all. Open the picker and the list is in the
+order you ran things, newest first, so the up arrow still lands on the command
+you just ran. Nothing you run often can push it off that row.
+
+Searching stays fast on a store of any size. Commands are scored several at a
+time using the vector instructions your processor already has, and a search is
+narrowed by which characters a command contains before any of it is scored. On
+a full window a keystroke costs a couple of milliseconds.
 
 Commands are syntax highlighted. The program name, flags, paths, variables,
 quoted strings and operators each get their own color, so a long row reads at a
