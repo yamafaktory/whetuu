@@ -3,6 +3,13 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.11 — 2026-08-05
+
+### Changed
+
+- Match history loosely and show the closest command first
+- Give the picker's search numbers the machine they came from
+
 ## v0.1.10 — 2026-07-27
 
 ### Changed
