@@ -80,6 +80,23 @@ const ScopeBar = struct {
     cols: usize,
 };
 
+/// What the shell does with a picked command: run it, or leave it on the
+/// command line for the shell's own editor to work on.
+pub const Action = enum { run, edit };
+
+/// The exit status `whetuu history` uses to tell the shell integration that the
+/// command it printed is for editing rather than running. The choice itself goes
+/// to stdout either way, so the integrations only branch on this. Picked well
+/// clear of the small statuses a shell or a signal produces on its own, so a
+/// crashed picker can never read as an edit.
+pub const edit_exit_code = 10;
+
+/// A picked command and what to do with it.
+pub const Choice = struct {
+    command: []const u8,
+    action: Action,
+};
+
 /// Caller-supplied context for one picker session.
 pub const Options = struct {
     /// Seeds the query — the shell passes whatever was already typed on the
@@ -95,13 +112,11 @@ pub const Options = struct {
 /// Opens the picker over `items` (newest first), returning the chosen command
 /// or null when the user cancels, the list is empty, or no controlling terminal
 /// is available. The list opens scoped to `opts.cwd` when that directory has
-/// history (all history otherwise) and Ctrl+G toggles the scope. Tab copies
-/// the selected entry into the query (with a trailing space) so it can be
-/// edited, and Enter then returns that text. Otherwise Enter returns the
-/// selected entry, or the query when nothing matches it. See `confirm`, which
-/// decides between the two. Entry ages are re-read from the clock on every frame
-/// and the key read times out once a second, so the time column stays live
-/// while the picker idles.
+/// history (all history otherwise) and Ctrl+G toggles the scope. Enter picks the
+/// selected entry to run, Tab picks it to edit, and both fall back to the query
+/// when nothing matches it. See `accept`. Entry ages are re-read from the clock
+/// on every frame and the key read times out once a second, so the time column
+/// stays live while the picker idles.
 ///
 /// Three arenas keep an idle picker from growing or from touching the terminal
 /// for no reason. The frame buffer comes from a scratch arena reset every
@@ -112,7 +127,7 @@ pub const Options = struct {
 /// written is kept on `arena` and compared against the next one, so a redraw
 /// that would change nothing is never sent. The terminal is always restored on
 /// exit.
-pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]const u8 {
+pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?Choice {
     if (items.len == 0) return null;
 
     const fd = posix.openat(posix.AT.FDCWD, "/dev/tty", .{ .ACCMODE = .RDWR }, 0) catch return null;
@@ -141,9 +156,6 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
     var shown: []const Entry = &.{};
     var rescope = true;
     var refilter = true;
-    // Set by Tab: the query is a command being edited, not a filter. See
-    // `confirm`.
-    var editing = false;
 
     while (true) {
         _ = frame_arena.reset(.retain_capacity);
@@ -188,33 +200,16 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
         });
 
         switch (input.next(fd)) {
-            .up => {
-                if (selected + 1 < shown.len) selected += 1;
-                editing = false;
+            .up => if (selected + 1 < shown.len) {
+                selected += 1;
             },
-            .down => {
-                if (selected > 0) selected -= 1;
-                editing = false;
+            .down => if (selected > 0) {
+                selected -= 1;
             },
-            .enter => return confirm(editing, query.items, shown, selected),
-            .tab => {
-                if (shown.len == 0) continue;
-
-                query.clearRetainingCapacity();
-                query.appendSlice(arena, shown[selected].command) catch {};
-                query.append(arena, ' ') catch {};
-                selected = 0;
-                refilter = true;
-                editing = true;
-            },
-            .newest => {
-                selected = 0;
-                editing = false;
-            },
-            .oldest => {
-                selected = shown.len -| 1;
-                editing = false;
-            },
+            .enter => return accept(query.items, shown, selected, .run),
+            .tab => return accept(query.items, shown, selected, .edit),
+            .newest => selected = 0,
+            .oldest => selected = shown.len -| 1,
             .backspace => {
                 if (popCodepoint(&query)) refilter = true;
                 selected = 0;
@@ -231,7 +226,6 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?[]co
                 selected = 0;
                 rescope = true;
                 refilter = true;
-                editing = false;
             },
             .cancel => return null,
             .tick, .other => {},
@@ -256,9 +250,10 @@ fn initialScope(items: []const Entry, cwd: []const u8) Scope {
     return .all;
 }
 
-/// Drops the last codepoint of `query`, returning whether there was one. Tab can
-/// copy a stored command holding a multibyte character into the query, and
-/// dropping a byte of one would leave the rest to render as replacement glyphs.
+/// Drops the last codepoint of `query`, returning whether there was one. The
+/// shell seeds the query with whatever was already on its command line, which
+/// can hold a multibyte character, and dropping a byte of one would leave the
+/// rest to render as replacement glyphs.
 fn popCodepoint(query: *std.ArrayList(u8)) bool {
     if (query.items.len == 0) return false;
 
@@ -415,26 +410,23 @@ fn tail(text: []const u8, cols: usize) []const u8 {
     return text[start..];
 }
 
-/// The command Enter falls back to when no entry matches: the query text the
-/// user typed (e.g. a tabbed entry plus new flags), stripped of the padding
-/// spaces, or null when the query is effectively empty.
+/// The command a pick falls back to when no entry matches: the query text the
+/// user typed, stripped of the padding spaces, or null when the query is
+/// effectively empty.
 fn queryFallback(query: []const u8) ?[]const u8 {
     const trimmed = std.mem.trim(u8, query, " ");
     return if (trimmed.len == 0) null else trimmed;
 }
 
-/// What Enter returns. Filtering, that is the selected entry. Editing, it is
-/// the query itself.
+/// What a picking key hands back: the selected entry, or the typed query when
+/// nothing matched it, paired with `action`. Null closes the picker with
+/// nothing, which is what a key with neither a match nor a query means.
 ///
-/// Tab starts editing, because it hands the selected command over as text to
-/// work on rather than as a narrower filter. The entry it came from keeps
-/// matching while you edit — dropping a bad argument leaves a query every
-/// remaining word of which is still in the original — so it stays selected and
-/// returning it would hand back the very command being fixed. Moving the
-/// selection is picking again, and ends editing.
-fn confirm(editing: bool, query: []const u8, shown: []const Entry, selected: usize) ?[]const u8 {
-    if (editing or shown.len == 0) return queryFallback(query);
-    return shown[selected].command;
+/// Enter and Tab differ only in `action`, so a command typed rather than
+/// recalled can be edited on the shell's line too.
+fn accept(query: []const u8, shown: []const Entry, selected: usize, action: Action) ?Choice {
+    const command = if (shown.len == 0) queryFallback(query) orelse return null else shown[selected].command;
+    return .{ .command = command, .action = action };
 }
 
 /// Switches the terminal to raw mode: no line buffering, no echo, and signals
@@ -693,7 +685,8 @@ test "backspace drops a whole character, not one byte of one" {
     var query: std.ArrayList(u8) = .empty;
     defer query.deinit(std.testing.allocator);
 
-    // Tab copies stored commands in, so the query can hold multibyte text.
+    // The shell seeds the query with its command line, so it can hold multibyte
+    // text.
     try query.appendSlice(std.testing.allocator, "echo café");
     try std.testing.expect(popCodepoint(&query));
     try std.testing.expectEqualStrings("echo caf", query.items);
@@ -801,7 +794,7 @@ const Frame = struct {
 
         // Search line pinned to the last row; no trailing newline so it never
         // scrolls, leaving the cursor parked right after the query. The query is
-        // sanitized because Tab can copy a stored command into it.
+        // sanitized because the shell seeds it with its own command line.
         try f.appendSlice(arena, sgr.fg_purple ++ star ++ sgr.reset ++ " ");
         try f.appendSlice(arena, try style.sanitize(arena, fr.query));
         try f.appendSlice(arena, "\x1b[J" ++ show_cursor);
@@ -918,7 +911,8 @@ fn totalWidth(tokens: []const highlight.Token) usize {
 /// arrive here as a row of `?`. Defanging comes second and through `sanitize`,
 /// so a row is held to the same rule as the rest of what whetuu draws. This only
 /// changes how an entry is drawn — Enter and Tab both hand back the stored
-/// command untouched, so what runs is what was recorded, spacing and all.
+/// command untouched, so what reaches the shell is what was recorded, spacing
+/// and all.
 fn oneLine(arena: Allocator, text: []const u8) Allocator.Error![]const u8 {
     if (!needsCollapsing(text)) return style.sanitize(arena, text);
 
@@ -1557,27 +1551,28 @@ test "queryFallback returns the trimmed query and null when empty" {
     try std.testing.expect(queryFallback("") == null);
 }
 
-test "Enter runs the edited query, not the entry Tab took it from" {
+test "Enter and Tab take the same command and differ only in what happens to it" {
     const good: Entry = .{ .command = "python3 -m http.server -d docs 8000", .cwd = "/w", .timestamp = 1 };
     const typo: Entry = .{ .command = "python3 -m http.server -d docs 8000 sdf", .cwd = "/w", .timestamp = 2, .failed = true };
-
-    // Filtering: a few words narrow the list and Enter takes what is selected.
     const both = [_]Entry{ typo, good };
-    try std.testing.expectEqualStrings(typo.command, confirm(false, "http.server", &both, 0).?);
-    try std.testing.expectEqualStrings(good.command, confirm(false, "http.server", &both, 1).?);
 
-    // Editing: Tab copied the failure in and the bad argument was deleted. The
-    // failure still matches every word left, so it is still shown and still
-    // selected. Enter has to hand back the text, or it re-runs the typo.
-    const fixed = "python3 -m http.server -d docs 8000 ";
-    try std.testing.expect(search.matches(typo.command, fixed));
-    try std.testing.expectEqualStrings(good.command, confirm(true, fixed, &both, 0).?);
+    // A few words narrow the list and both keys take what is selected. Tab
+    // hands back the entry itself, so the shell gets the whole command to edit
+    // rather than the words that found it.
+    try std.testing.expectEqualStrings(typo.command, accept("http.server", &both, 0, .run).?.command);
+    try std.testing.expectEqualStrings(typo.command, accept("http.server", &both, 0, .edit).?.command);
+    try std.testing.expectEqualStrings(good.command, accept("http.server", &both, 1, .edit).?.command);
+    try std.testing.expectEqual(Action.run, accept("http.server", &both, 0, .run).?.action);
+    try std.testing.expectEqual(Action.edit, accept("http.server", &both, 0, .edit).?.action);
 
-    // Editing down to nothing has nothing to run.
-    try std.testing.expect(confirm(true, "   ", &both, 0) == null);
+    // No match falls back to the query, so a command typed rather than recalled
+    // can be edited on the shell's line too.
+    try std.testing.expectEqualStrings("git wip", accept("git wip ", &.{}, 0, .run).?.command);
+    try std.testing.expectEqualStrings("git wip", accept("git wip ", &.{}, 0, .edit).?.command);
 
-    // Filtering with no match falls back to the query, as it always has.
-    try std.testing.expectEqualStrings("git wip", confirm(false, "git wip ", &.{}, 0).?);
+    // Neither a match nor a query is nothing to hand over.
+    try std.testing.expect(accept("   ", &.{}, 0, .run) == null);
+    try std.testing.expect(accept("", &.{}, 0, .edit) == null);
 }
 
 test "head and tail cut on a utf-8 boundary and measure in columns" {

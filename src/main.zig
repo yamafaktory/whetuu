@@ -175,9 +175,10 @@ fn runRender(io: Io, arena: Allocator, environ: Environ, args: []const [:0]const
 /// that ran successfully are stored), while `history [--query <text>]
 /// [--last <command>]` opens the interactive picker — seeded with `text`, the
 /// shell's current command line — and prints the chosen command to stdout for
-/// the shell to place on the command line. `--last` is the command that just
-/// failed, shown marked at the top and never stored, so the thing that broke
-/// can be recalled without cluttering the store.
+/// the shell to place on the command line, exiting with `picker.edit_exit_code`
+/// when the pick was Tab and the shell should stop there rather than run it.
+/// `--last` is the command that just failed, shown marked at the top and never
+/// stored, so the thing that broke can be recalled without cluttering the store.
 fn runHistory(io: Io, arena: Allocator, environ: Environ, args: []const [:0]const u8) !void {
     const xdg = envOrEmpty(environ, "XDG_DATA_HOME");
     const home = envOrEmpty(environ, "HOME");
@@ -208,9 +209,14 @@ fn runHistory(io: Io, arena: Allocator, environ: Environ, args: []const [:0]cons
 
     var buf: [4096]u8 = undefined;
     var fw = Io.File.stdout().writer(io, &buf);
-    try fw.interface.writeAll(chosen);
+    try fw.interface.writeAll(chosen.command);
     try fw.interface.writeByte('\n');
     try fw.interface.flush();
+
+    // The command is already on stdout, so the status is only how the shell
+    // learns not to run it. Flushed first, since exiting here skips the writer's
+    // own cleanup.
+    if (chosen.action == .edit) std.process.exit(picker.edit_exit_code);
 }
 
 /// Prepends the just-failed command as an ephemeral, most-recent entry the

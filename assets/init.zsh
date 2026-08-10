@@ -42,22 +42,30 @@ __whetuu_precmd() {
 add-zsh-hook preexec __whetuu_preexec
 add-zsh-hook precmd __whetuu_precmd
 
-# Up arrow opens the whetuu history picker and runs the chosen command right
-# away, the same as the fish integration. Anything already typed seeds the
-# picker's search field, and the last failed command is passed with --last so it
-# appears marked at the top. Cancelling leaves the slot alone, so the failed
-# command is still offered next time. The picker draws on /dev/tty, so its stdout
-# is only the choice.
+# Up arrow opens the whetuu history picker, the same as the fish integration.
+# Enter runs the chosen command right away, Tab leaves it on the line to edit.
+# Anything already typed seeds the picker's search field, and the last failed
+# command is passed with --last so it appears marked at the top. Cancelling
+# leaves the slot alone, so the failed command is still offered next time. The
+# picker draws on /dev/tty, so its stdout is only the choice.
+#
+# Exit status 10 is the picker saying Tab, so the buffer is replaced but not
+# accepted.
 __whetuu_history() {
-    local picked
+    local picked picked_status
     picked=$(command whetuu history --query "$BUFFER" --last "$__whetuu_failed" --last-at "$__whetuu_failed_at" </dev/tty)
-    if [[ -n "$picked" ]]; then
-        BUFFER=$picked
-        CURSOR=${#BUFFER}
-        zle accept-line
-    else
+    picked_status=$?
+    if [[ -z "$picked" ]]; then
         zle redisplay
+        return
     fi
+    BUFFER=$picked
+    CURSOR=${#BUFFER}
+    if [[ "$picked_status" -eq 10 ]]; then
+        zle redisplay
+        return
+    fi
+    zle accept-line
 }
 
 if [[ -o interactive ]]; then

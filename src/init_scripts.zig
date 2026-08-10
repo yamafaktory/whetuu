@@ -13,6 +13,7 @@ const Io = std.Io;
 const Writer = std.Io.Writer;
 
 const Shell = @import("Env.zig").Shell;
+const picker = @import("picker.zig");
 const style = @import("style.zig");
 
 const bash_init = @embedFile("init.bash");
@@ -96,6 +97,17 @@ test "every supported shell resolves to its embedded script" {
     for ([_][]const u8{ "bash", "fish", "zsh" }) |name| {
         const source = script(try parse(name));
         try std.testing.expect(std.mem.indexOf(u8, source, "whetuu") != null);
+    }
+}
+
+test "every integration reads the status Tab exits with" {
+    // Three scripts hardcode the number, since a shell cannot ask the binary
+    // what it is. Moving `edit_exit_code` without moving them would silently
+    // turn every Tab back into a command that runs itself.
+    const code = std.fmt.comptimePrint("{d}", .{picker.edit_exit_code});
+    for ([_][]const u8{ "bash", "fish", "zsh" }) |name| {
+        const source = script(try parse(name));
+        try std.testing.expect(std.mem.indexOf(u8, source, code) != null);
     }
 }
 

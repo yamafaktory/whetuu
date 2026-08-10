@@ -64,27 +64,32 @@ __whetuu_precmd() {
 }
 PROMPT_COMMAND=__whetuu_precmd
 
-# Up arrow opens the whetuu history picker and runs the chosen command right
-# away, the same as the fish and zsh integrations. Anything already typed seeds
-# the picker's search field, and the last failed command is passed with --last
-# so it appears marked at the top. Cancelling leaves the slot alone, so the
-# failed command is still offered next time. The picker draws on /dev/tty, so its
-# stdout is only the choice.
+# Up arrow opens the whetuu history picker, the same as the fish and zsh
+# integrations. Enter runs the chosen command right away, Tab leaves it on the
+# line to edit. Anything already typed seeds the picker's search field, and the
+# last failed command is passed with --last so it appears marked at the top.
+# Cancelling leaves the slot alone, so the failed command is still offered next
+# time. The picker draws on /dev/tty, so its stdout is only the choice.
 #
 # A `bind -x` function cannot run a command itself, so the key expands to a
 # two-step macro: the function first, then a follow-up key. The function decides
 # what that follow-up key does before readline gets to it, which is how the
 # choice is run but a cancel is not. readline resolves each key of a macro as it
 # reads it, so rebinding from inside the function takes effect in time.
+#
+# Exit status 10 is the picker saying Tab, so the line is replaced but the
+# follow-up key is left harmless, exactly as a cancel leaves it.
 __whetuu_history() {
-    local picked
+    local picked picked_status
     picked=$(command whetuu history --query "$READLINE_LINE" --last "$__whetuu_failed" --last-at "$__whetuu_failed_at" </dev/tty)
+    picked_status=$?
     if [[ -n "$picked" ]]; then
         READLINE_LINE="$picked"
         READLINE_POINT=${#READLINE_LINE}
+    fi
+    if [[ -n "$picked" && "$picked_status" -ne 10 ]]; then
         bind '"\C-x\C-z": accept-line'
     else
-        # Cancelled. Leave the line alone and make the follow-up key harmless.
         bind '"\C-x\C-z": redraw-current-line'
     fi
 }

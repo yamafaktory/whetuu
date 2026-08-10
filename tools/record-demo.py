@@ -145,15 +145,15 @@ def main():
         drain(0.6)
 
         # A typo fails, turning the star red. The next up-arrow brings it back at
-        # the top of the picker in red, so it is fixed on the search line rather
+        # the top of the picker in red, so it is fixed on the command line rather
         # than retyped. Running the fix clears it and returns the star to purple.
         line("gti status", 1.6)                 # unknown command: fails, star red
         drain(0.8)
         os.write(fd, b"\x1b[A")                 # up-arrow: the failed command, red
         drain(2.4)
-        os.write(fd, b"\t")                     # copy it onto the search line
+        os.write(fd, b"\t")                     # Tab: onto the shell's own line
         drain(1.4)
-        for _ in range(len("gti status ")):     # clear the copied text
+        for _ in range(len("gti status")):      # clear it, in fish's line editor
             os.write(fd, b"\x7f")
             drain(0.07)
         send("git status", 0.08)                # retype it correctly
@@ -185,14 +185,13 @@ def main():
         drain(2.0)
 
         # Filter, which also ranks: the closest match takes the selected row and
-        # looser ones climb away from it. Then Tab it into the search field and
-        # append a flag, since once the text stops matching anything Enter runs
-        # it as typed.
+        # looser ones climb away from it. Then Tab hands the selection to fish,
+        # which highlights it as you append a flag, and Enter runs it from there.
         send("stat", 0.2)
         drain(2.2)
-        os.write(fd, b"\t")                     # copy the selection to the query
+        os.write(fd, b"\t")                     # Tab: onto the shell's own line
         drain(2.2)
-        send("--branch", 0.16)                  # Tab already left a trailing space
+        send(" --branch", 0.16)                 # edited with fish's line editor
         drain(2.4)
         os.write(fd, b"\r")                     # runs the edited command
         drain(3.5)

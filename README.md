@@ -379,15 +379,19 @@ yet. A bar at the top names both scopes and highlights the active one, like
 - **↑ / ↓** — move the selection, where ↑ goes further back in time
 - **Home / End** — jump to the newest command or to the oldest one on the list
 - **Ctrl+G** — switch between this directory's history and all history
-- **Tab** — copy the selected command into the search field, with a trailing
-  space, so you can edit it or append flags before running. Enter then runs what
-  you typed, not the entry it came from
-- **Enter** — run the selected command, or the text you typed after a Tab.
-  Moving the selection with the arrows goes back to running the selection. With
-  no Tab, a search that matches nothing runs as typed
+- **Enter** — run the selected command. A search that matches nothing runs as
+  typed
+- **Tab** — put the selected command on your shell's command line without
+  running it, so you can edit it there before you press Enter
 - **Esc / Ctrl-C** — cancel, leaving whatever you had typed on the command line
 
 The picker behaves the same in all three shells.
+
+Tab is for the command that is almost right. It closes the picker and hands the
+command to your shell, which means you edit it with the editor you already know.
+Arrow keys, word jumps, your own key bindings and fish's syntax highlighting all
+work, because at that point the line is an ordinary command line. whetuu is out
+of the way. Press Enter to run it, or Ctrl-C to drop it.
 
 The list grows upward from the bottom. The most recent command sits just above
 the search line and older ones climb from there. Type and the closest match
