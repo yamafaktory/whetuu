@@ -3,6 +3,12 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.12 — 2026-08-10
+
+### Changed
+
+- Hand a picked command to the shell's line editor with Tab
+
 ## v0.1.11 — 2026-08-05
 
 ### Changed
