@@ -11,6 +11,7 @@ concurrency:
 
 env:
   ZIG_VERSION: 0.17.0-dev.1422+e863bf3be
+  RUFF_VERSION: 0.16.3
 
 jobs:
   test:
@@ -24,6 +25,29 @@ jobs:
       - run: zig fmt --check src build.zig
       - run: zig build check
       - run: zig build test
+
+  lint:
+    name: Lint the tools and the shell integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: ${{ env.RUFF_VERSION }}
+          args: check
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: ${{ env.RUFF_VERSION }}
+          args: format --check
+      # shellcheck reads sh and bash. zsh and fish are parsed by their own
+      # shells instead, which is all either one offers.
+      - run: shellcheck tools/*.sh docs/install.sh assets/init.bash
+      - run: sudo apt-get update && sudo apt-get install -y zsh fish
+      - name: Parse every shell integration
+        run: |
+          bash -n assets/init.bash
+          zsh -n assets/init.zsh
+          fish --no-execute assets/init.fish
 
   cross-compile:
     # Guards against reintroducing a Linux-only syscall (std.os.linux.*) that

@@ -18,6 +18,10 @@
 # directory is not already on PATH. Set WHETUU_NO_MODIFY=1 to have it print them
 # instead. It touches no other file and never the config of a shell you do not
 # use.
+#
+# The config lines and the PATH line are printed with their $ intact, for the
+# shell to expand when it reads them back. That is every SC2016 in this file.
+# shellcheck disable=SC2016
 
 set -eu
 

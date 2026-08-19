@@ -27,6 +27,7 @@ esac
 # Seed with the newest entry of the loaded history file so it is not recorded
 # as if it had just run when the first status line draws.
 __whetuu_last_hist=""
+# shellcheck disable=SC1007  # HISTTIMEFORMAT= is a prefix assignment, not a typo
 read -r __whetuu_last_hist _ <<<"$(HISTTIMEFORMAT= history 1)"
 
 # Record the command that just finished, forwarding its exit status so whetuu
@@ -34,6 +35,7 @@ read -r __whetuu_last_hist _ <<<"$(HISTTIMEFORMAT= history 1)"
 # re-recording when the status line redraws without a new command (plain Enter).
 __whetuu_record() {
     local num cmd
+    # shellcheck disable=SC1007
     read -r num cmd <<<"$(HISTTIMEFORMAT= history 1)"
     [[ -z "$num" || "$num" == "$__whetuu_last_hist" ]] && return
     __whetuu_last_hist="$num"

@@ -5,7 +5,22 @@ Everything recorded is genuine program output; only the keystrokes and their
 timing are scripted. fish is used because the up-arrow history-picker binding
 is part of the fish integration only.
 """
-import json, os, pty, re, select, shutil, signal, subprocess, sys, tempfile, time, fcntl, termios, struct
+
+import contextlib
+import fcntl
+import json
+import os
+import pty
+import re
+import select
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import termios
+import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WHETUU = os.environ.get("WHETUU_BIN", os.path.join(REPO, "zig-out", "bin", "whetuu"))
@@ -21,8 +36,15 @@ if shutil.which("fish") is None:
 
 
 def sh(cmd, cwd, env):
-    subprocess.run(cmd, shell=True, cwd=cwd, check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+    subprocess.run(
+        cmd,
+        shell=True,
+        cwd=cwd,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=env,
+    )
 
 
 def build_env():
@@ -38,43 +60,52 @@ def build_env():
     with open(os.path.join(proj, "src", "main.zig"), "w") as f:
         f.write("pub fn main() void {}\n")
 
-    genv = dict(os.environ, HOME=home,
-                GIT_CONFIG_GLOBAL=os.path.join(home, ".gitconfig"))
+    genv = dict(os.environ, HOME=home, GIT_CONFIG_GLOBAL=os.path.join(home, ".gitconfig"))
     sh("git init -q -b main", proj, genv)
     sh("git config user.email demo@example.com && git config user.name demo", proj, genv)
     sh("git config commit.gpgsign false", proj, genv)
     sh("git add -A && git commit -qm 'Initial commit'", proj, genv)
     with open(os.path.join(proj, "src", "main.zig"), "a") as f:
         f.write("// tweak\n")
-    open(os.path.join(proj, "notes.md"), "w").write("scratch\n")
+    with open(os.path.join(proj, "notes.md"), "w") as f:
+        f.write("scratch\n")
 
     cfg = os.path.join(home, ".config", "fish")
     os.makedirs(cfg)
     with open(os.path.join(cfg, "config.fish"), "w") as f:
         f.write("set -g fish_greeting\n")
-        f.write(f'set -gx PATH {os.path.dirname(WHETUU)} $PATH\n')
+        f.write(f"set -gx PATH {os.path.dirname(WHETUU)} $PATH\n")
         f.write("whetuu init fish | source\n")
 
     # Seed history from a second directory, through whetuu's own recorder, so
     # the scope toggle has something to reveal instead of showing one list twice.
     notes = os.path.join(home, "notes")
     os.makedirs(notes)
-    henv = dict(os.environ, HOME=home,
-                XDG_DATA_HOME=os.path.join(home, ".local", "share"))
-    for cmd in ("cargo build --release", "rg TODO --stats",
-                "hyperfine './bench --iters 100'", "tar -czf notes.tar.gz ."):
-        subprocess.run([WHETUU, "history", "add", "--status", "0", "--", cmd],
-                       cwd=notes, env=henv, check=True)
+    henv = dict(os.environ, HOME=home, XDG_DATA_HOME=os.path.join(home, ".local", "share"))
+    for cmd in (
+        "cargo build --release",
+        "rg TODO --stats",
+        "hyperfine './bench --iters 100'",
+        "tar -czf notes.tar.gz .",
+    ):
+        subprocess.run(
+            [WHETUU, "history", "add", "--status", "0", "--", cmd], cwd=notes, env=henv, check=True
+        )
         time.sleep(0.05)
     return home, proj
 
 
 def main():
     home, proj = build_env()
-    env = dict(os.environ, HOME=home,
-               XDG_CONFIG_HOME=os.path.join(home, ".config"),
-               XDG_DATA_HOME=os.path.join(home, ".local", "share"),
-               TERM="xterm-256color", COLUMNS=str(COLS), LINES=str(ROWS))
+    env = dict(
+        os.environ,
+        HOME=home,
+        XDG_CONFIG_HOME=os.path.join(home, ".config"),
+        XDG_DATA_HOME=os.path.join(home, ".local", "share"),
+        TERM="xterm-256color",
+        COLUMNS=str(COLS),
+        LINES=str(ROWS),
+    )
 
     pid, fd = pty.fork()
     if pid == 0:
@@ -88,13 +119,13 @@ def main():
     def respond(chunk):
         """fish probes the terminal on startup and blocks until it gets answers."""
         out = b""
-        if b"\x1b[?u" in chunk:                       # kitty keyboard protocol
+        if b"\x1b[?u" in chunk:  # kitty keyboard protocol
             out += b"\x1b[?0u"
-        if b"\x1b]11;?" in chunk:                     # background colour
+        if b"\x1b]11;?" in chunk:  # background colour
             out += b"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\"
         for _ in re.finditer(rb"\x1bP\+q[0-9a-fA-F]+\x1b\\", chunk):
-            out += b"\x1bP0+r\x1b\\"                  # XTGETTCAP: unsupported
-        if b"\x1b[6n" in chunk:                       # cursor position report
+            out += b"\x1bP0+r\x1b\\"  # XTGETTCAP: unsupported
+        if b"\x1b[6n" in chunk:  # cursor position report
             out += b"\x1b[1;1R"
         if b"\x1b[0c" in chunk or b"\x1b[c" in chunk:  # primary DA, sent last
             out += b"\x1b[?62;22c"
@@ -121,8 +152,7 @@ def main():
             reply = respond(data)
             if reply:
                 os.write(fd, reply)
-            events.append([round(time.time() - start, 4), "o",
-                           data.decode("utf8", "replace")])
+            events.append([round(time.time() - start, 4), "o", data.decode("utf8", "replace")])
 
     def send(text, per_char=0.06):
         for ch in text:
@@ -136,52 +166,52 @@ def main():
         drain(settle)
 
     try:
-        drain(1.6)                              # first status line
+        drain(1.6)  # first status line
         line("git status --short", 1.4)
         drain(0.6)
         line("git switch -q -c feature/demo", 1.4)
         drain(0.6)
-        line("sleep 2", 3.2)                    # cmd_duration appears
+        line("sleep 2", 3.2)  # cmd_duration appears
         drain(0.6)
 
         # A typo fails, turning the star red. The next up-arrow brings it back at
         # the top of the picker in red, so it is fixed on the command line rather
         # than retyped. Running the fix clears it and returns the star to purple.
-        line("gti status", 1.6)                 # unknown command: fails, star red
+        line("gti status", 1.6)  # unknown command: fails, star red
         drain(0.8)
-        os.write(fd, b"\x1b[A")                 # up-arrow: the failed command, red
+        os.write(fd, b"\x1b[A")  # up-arrow: the failed command, red
         drain(2.4)
-        os.write(fd, b"\t")                     # Tab: onto the shell's own line
+        os.write(fd, b"\t")  # Tab: onto the shell's own line
         drain(1.4)
-        for _ in range(len("gti status")):      # clear it, in fish's line editor
+        for _ in range(len("gti status")):  # clear it, in fish's line editor
             os.write(fd, b"\x7f")
             drain(0.07)
-        send("git status", 0.08)                # retype it correctly
+        send("git status", 0.08)  # retype it correctly
         drain(1.8)
-        os.write(fd, b"\r")                      # run the fix (succeeds)
+        os.write(fd, b"\r")  # run the fix (succeeds)
         drain(1.8)
 
         # The history picker, shown properly: open, navigate, toggle scope,
         # filter, run.
-        os.write(fd, b"\x1b[A")                 # up-arrow opens it
+        os.write(fd, b"\x1b[A")  # up-arrow opens it
         drain(2.2)
 
-        for _ in range(3):                      # walk back through time
+        for _ in range(3):  # walk back through time
             os.write(fd, b"\x1b[A")
             drain(0.85)
-        for _ in range(2):                      # and forward again
+        for _ in range(2):  # and forward again
             os.write(fd, b"\x1b[B")
             drain(0.85)
         drain(0.8)
 
-        os.write(fd, b"\x07")                   # Ctrl+G: this dir -> all
+        os.write(fd, b"\x07")  # Ctrl+G: this dir -> all
         drain(2.2)
-        for _ in range(2):                      # the other directory's commands
+        for _ in range(2):  # the other directory's commands
             os.write(fd, b"\x1b[A")
             drain(0.9)
         drain(1.0)
 
-        os.write(fd, b"\x07")                   # Ctrl+G: back to this dir
+        os.write(fd, b"\x07")  # Ctrl+G: back to this dir
         drain(2.0)
 
         # Filter, which also ranks: the closest match takes the selected row and
@@ -189,30 +219,30 @@ def main():
         # which highlights it as you append a flag, and Enter runs it from there.
         send("stat", 0.2)
         drain(2.2)
-        os.write(fd, b"\t")                     # Tab: onto the shell's own line
+        os.write(fd, b"\t")  # Tab: onto the shell's own line
         drain(2.2)
-        send(" --branch", 0.16)                 # edited with fish's line editor
+        send(" --branch", 0.16)  # edited with fish's line editor
         drain(2.4)
-        os.write(fd, b"\r")                     # runs the edited command
+        os.write(fd, b"\r")  # runs the edited command
         drain(3.5)
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(OSError):
             os.close(fd)
-        except Exception:
-            pass
 
-    header = {"version": 2, "width": COLS, "height": ROWS,
-              "timestamp": int(start), "title": "whetuu",
-              "env": {"SHELL": "fish", "TERM": "xterm-256color"}}
+    header = {
+        "version": 2,
+        "width": COLS,
+        "height": ROWS,
+        "timestamp": int(start),
+        "title": "whetuu",
+        "env": {"SHELL": "fish", "TERM": "xterm-256color"},
+    }
     with open(OUT, "w") as f:
         f.write(json.dumps(header) + "\n")
-        for e in events:
-            f.write(json.dumps(e) + "\n")
+        f.writelines(json.dumps(e) + "\n" for e in events)
     dur = events[-1][0] if events else 0
     print(f"wrote {OUT}: {len(events)} events, {dur:.1f}s")
 

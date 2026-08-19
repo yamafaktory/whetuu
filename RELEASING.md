@@ -33,6 +33,25 @@ few minutes later, at
 [Actions](https://github.com/yamafaktory/whetuu/actions) and then
 [Releases](https://github.com/yamafaktory/whetuu/releases).
 
+## What CI checks
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs three jobs on every
+push and every pull request. `zig build publish` waits on the whole run, so any
+one of them going red stops a release.
+
+- **Format, check, test** — `zig fmt --check`, `zig build check` and
+  `zig build test`.
+- **Lint the tools and the shell integration** — `ruff` over `tools/`, then
+  `shellcheck` over `tools/*.sh`, `docs/install.sh` and `assets/init.bash`.
+  shellcheck reads sh and bash only. `assets/init.zsh` and `assets/init.fish`
+  are parsed by `zsh -n` and `fish --no-execute` instead, which is all either
+  shell offers.
+- **Cross-compile release targets** — `zig build release`.
+
+The ruff version is pinned as `RUFF_VERSION` in the workflow. Bump it in a
+commit of its own, so a new rule never turns a release red inside an unrelated
+change.
+
 ## The changelog
 
 [`CHANGELOG.md`](CHANGELOG.md) tracks every release in the repository, so the
