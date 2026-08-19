@@ -1,8 +1,10 @@
-//! whetuu entry point. Four subcommands:
+//! whetuu entry point. Five subcommands:
 //!   whetuu init <fish|bash|zsh>   — print the shell integration script
 //!   whetuu render [flags]         — render the status line (called by the shell)
 //!   whetuu history [add ...]      — open the history picker, or record a command
 //!   whetuu paths                  — print where the history and cache live
+//!   whetuu upgrade [--check]      — replace this binary with the newest release,
+//!                                   or with --check only say what is waiting
 //! plus `whetuu --version`.
 
 const std = @import("std");
@@ -17,8 +19,10 @@ const cli = @import("cli.zig");
 const history = @import("history.zig");
 const init_scripts = @import("init_scripts.zig");
 const picker = @import("picker.zig");
+const release = @import("release.zig");
 const render = @import("render.zig");
 const style = @import("style.zig");
+const upgrade = @import("upgrade.zig");
 const version_cache = @import("version_cache.zig");
 
 /// Upper bound on a current-directory path. Beyond this the directory is simply
@@ -67,6 +71,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
         return runPaths(io, arena, init.environ);
     }
 
+    if (std.mem.eql(u8, sub, "upgrade")) {
+        return upgrade.run(io, arena, init.environ, args[2..]);
+    }
+
     return unknownSubcommand(io, arena, sub);
 }
 
@@ -103,24 +111,28 @@ fn unknownSubcommand(io: Io, arena: Allocator, sub: []const u8) !void {
     std.process.exit(2);
 }
 
-/// Prints where whetuu keeps its two files, and whether each exists yet.
+/// Prints where whetuu keeps its three files, and whether each exists yet.
 /// Both follow the XDG base directory spec, so neither is under the directory
 /// the installer put the binary in: removing whetuu should not remove the
 /// history you built up with it.
 fn runPaths(io: Io, arena: Allocator, environ: Environ) !void {
     const home = envOrEmpty(environ, "HOME");
     const store = try history.storePath(arena, envOrEmpty(environ, "XDG_DATA_HOME"), home);
-    const cache = try version_cache.path(arena, envOrEmpty(environ, "XDG_CACHE_HOME"), home);
+    const xdg_cache = envOrEmpty(environ, "XDG_CACHE_HOME");
+    const cache = try version_cache.path(arena, xdg_cache, home);
+    var release_buf: [release.path_buf_len]u8 = undefined;
+    const releases = release.cachePath(&release_buf, xdg_cache, home);
 
     var buf: [1024]u8 = undefined;
     var fw = Io.File.stdout().writer(io, &buf);
     const w = &fw.interface;
 
     try w.writeAll(style.sgr.fg_purple ++ style.icon.star ++ style.sgr.reset ++ " " ++
-        style.sgr.dim ++ "whetuu keeps two files, both outside the install directory" ++
+        style.sgr.dim ++ "whetuu keeps three files, all outside the install directory" ++
         style.sgr.reset ++ "\n\n");
     try writePath(io, w, "history", store);
     try writePath(io, w, "cache", cache);
+    try writePath(io, w, "release", releases);
     try w.flush();
 }
 
@@ -265,6 +277,8 @@ fn usage(io: Io) !void {
         "  " ++ purple ++ "history" ++ reset ++ "                " ++ dim ++ "Open the interactive history picker" ++ reset ++ "\n" ++
         "  " ++ purple ++ "history add" ++ reset ++ "            " ++ dim ++ "Record a finished command (status 0 only)" ++ reset ++ "\n" ++
         "  " ++ purple ++ "paths" ++ reset ++ "                  " ++ dim ++ "Print where the history and cache live" ++ reset ++ "\n" ++
+        "  " ++ purple ++ "upgrade" ++ reset ++ "                " ++ dim ++ "Replace this binary with the newest release" ++ reset ++ "\n" ++
+        "  " ++ purple ++ "upgrade --check" ++ reset ++ "        " ++ dim ++ "Say what release is waiting, and install nothing" ++ reset ++ "\n" ++
         "  " ++ purple ++ "--version" ++ reset ++ "              " ++ dim ++ "Print the version" ++ reset ++ "\n";
 
     var buf: [256]u8 = undefined;
@@ -296,15 +310,18 @@ test {
     _ = @import("module_git.zig");
     _ = @import("module_language.zig");
     _ = @import("module_user_host.zig");
+    _ = @import("module_update.zig");
+    _ = @import("release.zig");
     _ = @import("render.zig");
     _ = @import("search.zig");
     _ = @import("style.zig");
     _ = @import("time_ago.zig");
+    _ = @import("upgrade.zig");
     _ = @import("version_cache.zig");
     _ = @import("width.zig");
 }
 
-test "paths reports both files, and says so when there is nowhere to write" {
+test "paths reports every file, and says so when there is nowhere to write" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -313,8 +330,11 @@ test "paths reports both files, and says so when there is nowhere to write" {
     // rather than under the directory the installer used.
     try std.testing.expectEqualStrings("/xd/whetuu/history", (try history.storePath(a, "/xd", "/h")).?);
     try std.testing.expectEqualStrings("/xc/whetuu/versions", (try version_cache.path(a, "/xc", "/h")).?);
+    var release_buf: [release.path_buf_len]u8 = undefined;
+    try std.testing.expectEqualStrings("/xc/whetuu/release", release.cachePath(&release_buf, "/xc", "/h").?);
     try std.testing.expectEqualStrings("/h/.local/share/whetuu/history", (try history.storePath(a, "", "/h")).?);
     try std.testing.expectEqualStrings("/h/.cache/whetuu/versions", (try version_cache.path(a, "", "/h")).?);
+    try std.testing.expectEqualStrings("/h/.cache/whetuu/release", release.cachePath(&release_buf, "", "/h").?);
 
     // whetuu creates no directory of its own in $HOME, so removing the binary
     // from ~/.local/bin cannot take the history with it, and an uninstall has
@@ -322,6 +342,7 @@ test "paths reports both files, and says so when there is nowhere to write" {
     for ([_][]const u8{
         (try history.storePath(a, "", "/h")).?,
         (try version_cache.path(a, "", "/h")).?,
+        release.cachePath(&release_buf, "", "/h").?,
     }) |path| {
         try std.testing.expect(std.mem.startsWith(u8, path, "/h/.local/share/") or
             std.mem.startsWith(u8, path, "/h/.cache/"));
@@ -329,6 +350,7 @@ test "paths reports both files, and says so when there is nowhere to write" {
 
     try std.testing.expect((try history.storePath(a, "", "")) == null);
     try std.testing.expect((try version_cache.path(a, "", "")) == null);
+    try std.testing.expect(release.cachePath(&release_buf, "", "") == null);
 }
 
 test "withLastFailure prepends the failure once, marked, dropping a same-dir duplicate" {

@@ -56,6 +56,7 @@ Left to right, each shown only when relevant:
 | `git` status  | `[=conflicts $stashes +staged !modified ?untracked ⇡ahead ⇣behind]`         |
 | `language`    | Logo and toolchain version in the brand color, for 39 languages and tools. Detected from a project manifest (`Cargo.toml`, `mix.exs`, …), a source file extension (`*.odin`, `*.rkt`, …), or an infra marker (`flake.nix`, `Dockerfile`, `*.tf` for Terraform and OpenTofu) |
 | `cmd_duration`| Timer glyph and `<time>` when the last command ran for 2 s or more          |
+| `update`      | Cloud glyph and the tag of a newer release, when one has been published. Read from a file, never the network. Absent the rest of the time |
 | `character`   | A star, purple by default, or in the language brand color. Turns red after a failed command |
 
 ## Performance
@@ -123,8 +124,24 @@ git config core.untrackedCache true
 
 whetuu reads your repository and prints a line. Here is what that involves.
 
-- **No network access.** The binary has no socket, HTTP or DNS code. There is no
-  telemetry and no update check.
+- **The network, in full.** Every request whetuu can make is a `GET` over TLS,
+  to one of three GitHub hosts, of a URL anyone can open in a browser:
+
+  | Host | What for | Sent by |
+  |---|---|---|
+  | `api.github.com` | the newest release tag | `upgrade`, `upgrade --check` |
+  | `github.com` | the release tarball and its `SHA256SUMS` | `upgrade` |
+  | `raw.githubusercontent.com` | `CHANGELOG.md` at that tag, to print what changed | `upgrade`, `upgrade --check` |
+
+  `whetuu upgrade` makes all three, and checks the download against
+  `SHA256SUMS` before writing anything. `whetuu upgrade --check` makes the first
+  and the last, and writes the tag to a file, which is how the status line knows
+  to show one. The
+  status line starts that check for itself at most **once a day**, in a detached
+  process whose output goes to `/dev/null`, and never asks anything itself. That
+  is the whole of it: no telemetry, no account, no server, and nothing about you
+  or your machine is sent — the requests carry a user agent of `whetuu/<version>`
+  and nothing else.
 - **Every path is one the spec already names.** The binary goes in
   `~/.local/bin`, the history store under `$XDG_DATA_HOME` and the version cache
   under `$XDG_CACHE_HOME`. whetuu creates no directory of its own in `$HOME`.
@@ -136,15 +153,19 @@ whetuu reads your repository and prints a line. Here is what that involves.
   `~/.local/bin` is not already on your `PATH`. Set `WHETUU_NO_MODIFY=1` and it
   prints them instead.
 - **No config file.** whetuu has none, so there is no config parser and no
-  format for anything to smuggle through. Running, it writes two files. One is
-  the history
-  store. The other is a version cache at `~/.cache/whetuu/versions`, or under
-  `$XDG_CACHE_HOME` when that is set. The cache holds toolchain version strings
-  and nothing else. Delete it whenever you like.
-- **Two subprocesses, both bounded.** `git --no-optional-locks status
+  format for anything to smuggle through. Running, it writes three files. One is
+  the history store. The others live under `~/.cache/whetuu`, or under
+  `$XDG_CACHE_HOME` when that is set: `versions` holds toolchain version strings,
+  and `release` holds the newest release tag and the time it was looked up.
+  Delete either whenever you like.
+- **Three subprocesses, and nothing else.** `git --no-optional-locks status
   --porcelain=2 --branch -z`, and the version command of the detected toolchain
-  (`zig version`, `node --version`, …). Neither runs outside a repository or a
-  project. Nothing else is executed.
+  (`zig version`, `node --version`, …), both bounded and neither run outside a
+  repository or a project. The third is whetuu itself, as `whetuu upgrade
+  --check`, at most once a day: detached, in a process group of its own, with
+  all three streams on
+  `/dev/null` so it can never write over your status line. Nothing else is
+  executed.
 - **The history store is `0600`**, set again on every append. Command lines
   routinely contain paths and secrets. The store lives at
   `~/.local/share/whetuu/history`, or under `$XDG_DATA_HOME` when that is set.
@@ -238,6 +259,38 @@ would be too.
 `WHETUU_INSTALL_DIR` puts the binary somewhere else, and then the shell config
 is left alone.
 
+### Upgrading
+
+```sh
+whetuu upgrade
+```
+
+The status line tells you when to run it: a cloud glyph and the new version
+appear once a release is out, and go away once you are on it. To read what is
+waiting before installing it:
+
+```sh
+whetuu upgrade --check
+```
+
+That names the release and prints its changelog entries, and installs nothing.
+
+It replaces the running binary with the newest release, wherever that binary
+lives, and prints every changelog entry between the two versions. The download
+is checked against the published `SHA256SUMS` before anything is written, and
+the new binary is renamed onto the old one, so an upgrade that fails halfway
+leaves the one you have running.
+
+whetuu does all of it itself. Your machine needs no curl, no tar and no shell
+for it. Running shells pick up the new binary on their next command. Open a new
+one to reload the init script.
+
+Two cases it leaves alone. A binary you cannot write to, which is what a package
+manager install looks like, so upgrade that the way you installed it. And a
+build from source, which reports `dev` and has no release to compare itself
+with. The installer above upgrades an install too, and running it twice changes
+nothing.
+
 ### Uninstall
 
 ```sh
@@ -246,10 +299,10 @@ rm -rf ~/.local/share/whetuu ~/.cache/whetuu
 ```
 
 Then delete the `# whetuu` block from your shell config. The first line removes
-the program. The second removes the history store and the version cache, which
-live under the XDG directories rather than next to the binary. Run
-`whetuu paths` before you delete anything and it prints both locations, in case
-`$XDG_DATA_HOME` or `$XDG_CACHE_HOME` moves them on your machine.
+the program. The second removes the history store and both caches, which live
+under the XDG directories rather than next to the binary. Run
+`whetuu paths` before you delete anything and it prints all three locations, in
+case `$XDG_DATA_HOME` or `$XDG_CACHE_HOME` moves them on your machine.
 
 ### From source
 
@@ -321,13 +374,15 @@ history picker is on the up arrow. The full command surface:
 | `whetuu history` | Open the interactive history picker |
 | `whetuu history add -- <command>` | Record a finished command. Called by the shell hook |
 | `whetuu paths` | Print where the history store and version cache live, and whether each file exists yet |
+| `whetuu upgrade` | Replace the running binary with the newest release, and print what changed |
+| `whetuu upgrade --check` | Say what release is waiting and what changed in it, and install nothing. Writes the tag down, which is what the status line reads. whetuu runs this for itself once a day |
 
 `render` and `history add` take flags that only the init scripts pass, namely
 exit status, duration and width. That is why they are left out here.
 
 `whetuu paths` marks a file that is not there yet rather than hiding it. A fresh
-install has neither until the first command is recorded and the first toolchain
-version is cached. With neither `$HOME` nor the matching XDG variable set it says
+install has none of them until the first command is recorded, the first toolchain
+version is cached, and the first release check runs. With neither `$HOME` nor the matching XDG variable set it says
 so, because then whetuu has nowhere to write.
 
 ## History

@@ -508,8 +508,16 @@ footer p { margin: 0 0 0.4rem; }
 
   <p class="note"><b>Needs a <a href="https://www.nerdfonts.com/">Nerd Font</a>.</b> whetuu draws the git branch, the language logos and the star with Nerd Font glyphs. Most terminal setups already run one, so try it first. If the star and the branch glyph come out as empty boxes, switch your terminal font.</p>
 
+  <h3>Upgrading</h3>
+  <p>One command, whatever route you installed by. <b>whetuu upgrade --check</b> first says what is waiting and prints its changelog, without installing it. It replaces the running binary with the newest release, wherever that binary lives, and prints every changelog entry between the two versions. The download is checked against the published <code>SHA256SUMS</code> before anything is written, and whetuu does all of it itself: no curl, no tar and no shell involved.</p>
+  <div class="cmd">
+    <code><span class="sigil">$</span> whetuu upgrade</code>
+    <button type="button" data-copy="whetuu upgrade">Copy</button>
+  </div>
+  <p class="note">Running shells pick up the new binary on their next command. Open a new one to reload the init script. A binary you cannot write to, which is what a package manager install looks like, is left alone.</p>
+
   <h3>Uninstalling</h3>
-  <p>One line for the program, one for the data. The history store and the version cache live under the XDG directories rather than next to the binary, so removing whetuu never takes your history with it. Run <code>whetuu paths</code> first if you want to see both locations, in case <code>$XDG_DATA_HOME</code> or <code>$XDG_CACHE_HOME</code> moves them on your machine.</p>
+  <p>One line for the program, one for the data. The history store and the two caches live under the XDG directories rather than next to the binary, so removing whetuu never takes your history with it. Run <code>whetuu paths</code> first if you want to see all three locations, in case <code>$XDG_DATA_HOME</code> or <code>$XDG_CACHE_HOME</code> moves them on your machine.</p>
   <div class="cmd">
     <code><span class="sigil">$</span> rm ~/.local/bin/whetuu &amp;&amp; rm -rf ~/.local/share/whetuu ~/.cache/whetuu</code>
     <button type="button" data-copy="rm ~/.local/bin/whetuu &amp;&amp; rm -rf ~/.local/share/whetuu ~/.cache/whetuu">Copy</button>
@@ -537,6 +545,7 @@ footer p { margin: 0 0 0.4rem; }
     <div class="mod"><dt>git status</dt><dd>Conflicts, stashes, staged, modified, untracked, ahead and behind, in one bracketed group.</dd></div>
     <div class="mod"><dt>language</dt><dd>Logo and toolchain version in the brand colour, for <b>39 languages and tools</b>. Detected from a project manifest, a source file extension, or an infra marker.</dd></div>
     <div class="mod"><dt>cmd_duration</dt><dd>Timer glyph and elapsed time, when the last command ran for two seconds or more.</dd></div>
+    <div class="mod"><dt>update</dt><dd>Cloud glyph and the tag of a newer release, once one is published, and nothing there the rest of the time. Read from a file the daily <b>whetuu upgrade --check</b> writes, never from the network.</dd></div>
     <div class="mod"><dt>character</dt><dd>A star, purple by default or in the language brand colour. Turns red after a failed command.</dd></div>
   </dl>
 </section>
@@ -586,6 +595,8 @@ footer p { margin: 0 0 0.4rem; }
         <tr><td class="first"><code>whetuu history</code></td><td class="desc">Open the interactive history picker.</td></tr>
         <tr><td class="first"><code>whetuu history add -- &lt;command&gt;</code></td><td class="desc">Record a finished command. Called by the shell hook.</td></tr>
         <tr><td class="first"><code>whetuu paths</code></td><td class="desc">Print where the history store and version cache live, and whether each file exists yet.</td></tr>
+        <tr><td class="first"><code>whetuu upgrade</code></td><td class="desc">Replace the running binary with the newest release, and print what changed.</td></tr>
+        <tr><td class="first"><code>whetuu upgrade --check</code></td><td class="desc">Say what release is waiting and what changed in it, and install nothing. Writes the tag down, which is what the status line reads. whetuu runs this for itself once a day.</td></tr>
       </tbody>
     </table>
   </div>
@@ -615,15 +626,15 @@ footer p { margin: 0 0 0.4rem; }
 </section>
 <section class="wrap" id="security">
   <p class="eyebrow">~/security</p>
-  <h2>Nothing leaves your machine</h2>
+  <h2>Your commands never leave your machine</h2>
   <p>A status line sees every command you run, and the picker keeps them. That is a lot to hand a small tool, so here is exactly what whetuu does and does not do.</p>
   <dl class="mods">
-    <div class="mod"><dt>No network</dt><dd>There is no socket, no HTTP client and no sync anywhere in the binary. No telemetry and no update check. There is no account and no server to opt out of.</dd></div>
-    <div class="mod"><dt>Two files</dt><dd>Running, whetuu writes exactly two. The history store, created with mode <b>600</b> and reset to it on every write, so one left readable by an older version corrects itself. And a cache of toolchain version strings at <b>~/.cache/whetuu/versions</b>, which holds nothing else and can be deleted whenever you like.</dd></div>
+    <div class="mod"><dt>The network, in full</dt><dd>Every request is a <b>GET</b> over TLS of a URL anyone can open in a browser. <b>whetuu upgrade</b> makes three: the newest release tag from <b>api.github.com</b>, the tarball and its <b>SHA256SUMS</b> from <b>github.com</b>, which it verifies before writing anything, and <b>CHANGELOG.md</b> from <b>raw.githubusercontent.com</b> to print what changed. <b>whetuu upgrade --check</b> makes the first and the last, and writes the tag to a file, which is how the status line knows to show one — and whetuu starts that check for itself at most <b>once a day</b>. That is all of it: no telemetry, no sync, no account, no server. The requests carry a user agent of <b>whetuu/&lt;version&gt;</b> and nothing else about you or your machine.</dd></div>
+    <div class="mod"><dt>Three files</dt><dd>Running, whetuu writes exactly three. The history store, created with mode <b>600</b> and reset to it on every write, so one left readable by an older version corrects itself. A cache of toolchain version strings at <b>~/.cache/whetuu/versions</b>. And <b>~/.cache/whetuu/release</b>, one line holding the newest release tag and when it was looked up. Delete any of them whenever you like.</dd></div>
     <div class="mod"><dt>Spec paths only</dt><dd>The binary goes in <b>~/.local/bin</b>, the history store under <b>$XDG_DATA_HOME</b> and the version cache under <b>$XDG_CACHE_HOME</b>. No directory of our own in your <b>$HOME</b>. <b>whetuu paths</b> prints both data locations.</dd></div>
     <div class="mod"><dt>One install edit</dt><dd>The installer appends the init line to the config of the shell in <b>$SHELL</b>, and nothing else. Not the config of a shell you do not use, and never twice. A <b>PATH</b> line joins it only when <b>~/.local/bin</b> is not already on your <b>PATH</b>. <b>WHETUU_NO_MODIFY=1</b> makes it print them instead.</dd></div>
     <div class="mod"><dt>Skip a command</dt><dd>Start a command with a space and it is never recorded. Use it for the ones carrying a token. Only successful commands are stored at all.</dd></div>
-    <div class="mod"><dt>No shell, ever</dt><dd>whetuu runs two subprocesses: <b>git</b> and the toolchain version probe, and neither outside a repository or a project. Both get a fixed list of arguments rather than a command line, so nothing you type is ever interpreted as a command. State like a rebase in progress is read straight out of <b>.git</b> with no subprocess at all.</dd></div>
+    <div class="mod"><dt>No shell, ever</dt><dd>whetuu runs three subprocesses: <b>git</b> and the toolchain version probe, neither outside a repository or a project, and once a day itself as <b>whetuu upgrade --check</b>, detached with every stream on <b>/dev/null</b>. Each gets a fixed list of arguments rather than a command line, so nothing you type is ever interpreted as a command. State like a rebase in progress is read straight out of <b>.git</b> with no subprocess at all.</dd></div>
     <div class="mod"><dt>Escapes defanged</dt><dd>Every control byte in a command, a branch name or a directory becomes a <b>?</b> before it reaches your terminal. A repository you just cloned cannot repaint your screen or move your cursor through whetuu.</dd></div>
     <div class="mod"><dt>Nothing to configure</dt><dd>No config file means no config parser, no theme format and nothing of yours being executed at startup. The attack surface is the binary and the two commands above.</dd></div>
     <div class="mod"><dt>One caveat</dt><dd>The language module picks which toolchain to probe from the files in the current directory, so entering an untrusted repository can make whetuu run something like <b>node --version</b>. It runs whatever your <b>PATH</b> resolves, never a binary from the repository.</dd></div>

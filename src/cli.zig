@@ -1,6 +1,6 @@
-//! Minimal flag parsing for the `render` and `history add` subcommands. The
-//! shell init scripts are the only callers, so the accepted flags are fixed
-//! and few.
+//! Minimal flag parsing for the `render`, `history add` and `upgrade`
+//! subcommands. The shell init scripts are the only callers of the first two,
+//! so the accepted flags are fixed and few.
 
 const std = @import("std");
 
@@ -21,6 +21,12 @@ pub const HistoryPickArgs = struct {
     query: []const u8 = "",
     last: []const u8 = "",
     last_at: i64 = 0,
+};
+
+/// Values parsed from `whetuu upgrade` flags. `--check` looks the newest
+/// release up and prints what it would install, without installing it.
+pub const UpgradeArgs = struct {
+    check: bool = false,
 };
 
 /// Values parsed from `whetuu render` flags. Fields default to a usable status
@@ -101,6 +107,20 @@ pub fn parseHistoryPick(args: []const [:0]const u8) ParseError!HistoryPickArgs {
     return result;
 }
 
+/// Parses `[--check]` for `upgrade`. The only flag it takes, and it takes no
+/// value. Anything else is rejected rather than ignored: a command that
+/// replaces the running binary must not treat a typo as consent to install.
+pub fn parseUpgrade(args: []const [:0]const u8) ParseError!UpgradeArgs {
+    var result: UpgradeArgs = .{};
+
+    for (args) |arg| {
+        if (!std.mem.eql(u8, arg, "--check")) return error.UnknownFlag;
+        result.check = true;
+    }
+
+    return result;
+}
+
 /// Parses `--shell`, `--status`, `--duration-ms`, and `--width` from `args`
 /// (which must exclude argv[0] and the subcommand). Unknown numeric values that
 /// overflow are clamped rather than rejected, since a shell can legitimately
@@ -167,6 +187,21 @@ test "overflow saturates to max" {
 test "unknown shell is rejected" {
     const args = [_][:0]const u8{ "--shell", "tcsh" };
     try std.testing.expectError(error.UnknownShell, parseRender(&args));
+}
+
+test "upgrade takes --check, and nothing else" {
+    try std.testing.expect(!(try parseUpgrade(&.{})).check);
+
+    const check = [_][:0]const u8{"--check"};
+    try std.testing.expect((try parseUpgrade(&check)).check);
+
+    // A typo must not install anything, so it is an error rather than a flag
+    // that was quietly dropped.
+    const typo = [_][:0]const u8{"--chekc"};
+    try std.testing.expectError(error.UnknownFlag, parseUpgrade(&typo));
+
+    const value = [_][:0]const u8{ "--check", "v0.1.15" };
+    try std.testing.expectError(error.UnknownFlag, parseUpgrade(&value));
 }
 
 test "history add parses status then command words after --" {

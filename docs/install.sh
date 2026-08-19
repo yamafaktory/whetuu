@@ -254,5 +254,8 @@ else
     fi
 fi
 
+printf '\nWhen a new version comes out, run whetuu upgrade. It replaces this binary\n'
+printf 'with the newest release and prints what changed.\n'
+
 printf '\nIf the star and the branch glyph render as boxes, your terminal font is\n'
 printf 'not a Nerd Font. Pick one from https://www.nerdfonts.com\n'

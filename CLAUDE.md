@@ -16,6 +16,36 @@ so only the one worth overlapping gets one.
 - When adding or changing code, look for opportunities to extract reusable helpers and avoid duplication. Shared logic belongs in a single place (e.g. escape-wrapping lives only in `style.zig`).
 - When fixing a bug, add a test that would have caught it to prevent regression.
 
+## Performance and security come first
+
+These two outrank every other preference in this file. A status line runs before
+every command you type, and it reads your repositories, your history and your
+environment.
+
+- **Do not allocate on a path that runs per render.** Prefer a buffer on the
+  stack and a function that writes into it (`std.fmt.bufPrint`,
+  `Io.Dir.readFile`) over an allocator and a function that hands back new memory
+  (`std.fmt.allocPrint`, `readFileAlloc`). An arena that has to grow pays an
+  `mmap` for it, and the usual answer a module gives is that it has nothing to
+  show, which should cost nothing at all. Take an allocator where the size is
+  genuinely unbounded, and let the signature say so.
+- **Prove a performance claim before you make it.** `hyperfine` pinned to one
+  core, several hundred runs, and the pair run in both orders, because the
+  machine drifts under you. Add a control that isolates the change: a command
+  that shares the startup but not the new work says whether the cost is where
+  you think it is. Page faults and system time say the same thing more directly.
+  A difference inside the noise is not a difference.
+- **Every byte from outside goes through `sanitize`** before it reaches the
+  terminal. A branch name, a directory, a command line, a changelog entry
+  downloaded a second ago. Control bytes repaint screens and move cursors.
+- **A network request is a decision, not a detail.** The README's security
+  section lists every host whetuu can reach and what sends the request. A change
+  that adds a host, or makes an existing request happen more often, updates that
+  list in the same commit or it does not land.
+- **Verify anything downloaded before it reaches the disk as a binary**, and put
+  it in place with a rename rather than a write. A partial write is a whetuu the
+  shell then runs.
+
 ## Zig Style
 
 Follow Zig master's own conventions: the official Style Guide in the language
@@ -174,6 +204,11 @@ by someone deciding whether to use whetuu, so it has to be plain.
 
 The published target list lives in `release_targets` in `build.zig`, and both CI
 workflows call `zig build release`, so it is the only place a target is named.
+The binary is handed that list as a build option, and `upgrade.zig` maps this
+machine to one of its entries: naming a target the list dropped is a compile
+error, and adding one to the list that no machine maps to fails a test. Adding a
+target is still a one line edit in `build.zig`, and now nothing has to remember
+to follow it.
 
 `CHANGELOG.md` is generated from commit subjects by `zig build changelog`, and
 `publish` regenerates it. Never edit it. The commit subject is the entry, so

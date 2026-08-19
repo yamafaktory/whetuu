@@ -1,7 +1,9 @@
 const std = @import("std");
 
-/// Targets published by `zig build release`. Shells limit this to unix: the
-/// status line only integrates with fish, bash and zsh.
+/// Targets published by `zig build release`, and the only list of them. It is
+/// handed to the binary as a build option, so `whetuu upgrade` cannot ask for a
+/// tarball this never built. Shells limit it to unix: the status line only
+/// integrates with fish, bash and zsh.
 const release_targets = [_][]const u8{
     "x86_64-linux-musl",
     "aarch64-linux-musl",
@@ -18,6 +20,7 @@ pub fn build(b: *std.Build) void {
     // Release builds stamp the tag in; a plain `zig build` reports "dev".
     const options = b.addOptions();
     options.addOption([]const u8, "version", version);
+    options.addOption([]const []const u8, "release_targets", &release_targets);
 
     const root = module(b, target, optimize, strip, options);
 

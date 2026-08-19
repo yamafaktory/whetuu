@@ -62,6 +62,12 @@ It is generated, never edited. `zig build publish` regenerates it with the
 pending tag and commits it alongside the version bump, so a release cannot ship
 a stale one. Nothing to remember and nothing to rename.
 
+`whetuu upgrade` reads this file at the tag it installs, and `whetuu upgrade
+--check` reads it at the tag it would install. Both print the sections newer
+than the version running. So the `## vX.Y.Z` heading is a format two
+things depend on, and a release whose changelog was not regenerated tells the
+user who upgrades to it nothing.
+
 ```sh
 zig build changelog        # preview, with what has landed under Unreleased
 ```

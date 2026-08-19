@@ -25,6 +25,11 @@ jobs:
       - run: zig fmt --check src build.zig
       - run: zig build check
       - run: zig build test
+      # The half the unit tests cannot reach: the GitHub API, the download, the
+      # checksum, a binary replacing itself, and the status line starting the
+      # daily check. Skips when GitHub does not answer, so a rate limit never
+      # reads as a broken upgrade.
+      - run: ./tools/test-release.sh
 
   lint:
     name: Lint the tools and the shell integration
