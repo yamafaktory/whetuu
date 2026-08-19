@@ -64,7 +64,25 @@ __whetuu_precmd() {
     fi
     PS1="$(whetuu render --shell bash --status "$exit" --duration-ms "$dur_ms" --width "$COLUMNS")"
 }
-PROMPT_COMMAND=__whetuu_precmd
+# PROMPT_COMMAND is a hook list, not the prompt: a terminal's own shell
+# integration, direnv and others register work there. It is an array from bash
+# 5.1 on and a string before it, and `PROMPT_COMMAND=x` overwrites the whole
+# string or the array's first element. whetuu prepends instead, so nothing else
+# is lost, and goes first so it reads the finished command's status before
+# another hook can change it. Sourcing this file twice still registers it once.
+__whetuu_hooks=" ${PROMPT_COMMAND[*]-} "
+case "${__whetuu_hooks//$'\n'/ }" in
+    *" __whetuu_precmd "*) ;;
+    *)
+        if ((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1))); then
+            PROMPT_COMMAND=(__whetuu_precmd "${PROMPT_COMMAND[@]}")
+        else
+            # shellcheck disable=SC2178,SC2128  # only reached on bash before 5.1, where it is a string
+            PROMPT_COMMAND="__whetuu_precmd${PROMPT_COMMAND:+$'\n'$PROMPT_COMMAND}"
+        fi
+        ;;
+esac
+unset __whetuu_hooks
 
 # Up arrow opens the whetuu history picker, the same as the fish and zsh
 # integrations. Enter runs the chosen command right away, Tab leaves it on the

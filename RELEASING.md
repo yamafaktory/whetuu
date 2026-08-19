@@ -45,7 +45,8 @@ one of them going red stops a release.
   `shellcheck` over `tools/*.sh`, `docs/install.sh` and `assets/init.bash`.
   shellcheck reads sh and bash only. `assets/init.zsh` and `assets/init.fish`
   are parsed by `zsh -n` and `fish --no-execute` instead, which is all either
-  shell offers.
+  shell offers. `tools/test-init.sh` then checks how the bash integration
+  registers its hook, which `zig build test` cannot reach.
 - **Cross-compile release targets** — `zig build release`.
 
 The ruff version is pinned as `RUFF_VERSION` in the workflow. Bump it in a

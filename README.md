@@ -354,6 +354,11 @@ picker. And on bash only, `ignorespace` is added to your `HISTCONTROL`, keeping
 whatever value you already had, so a space prefixed command stays out of both
 stores. `Ctrl+R` and everything else your shell gives you keep working.
 
+On bash the status line is drawn from a `PROMPT_COMMAND` hook. That is a list
+the shell shares with everything else that wants to run each prompt, so whetuu
+joins the front of it rather than replacing it. A terminal's own shell
+integration and tools like direnv keep working.
+
 A command is recorded once it finishes, and only when it exited with status 0.
 Typos and failed runs never enter the store. Prefix a command with a space to
 keep it out of the store entirely. Every command is stored together with the
