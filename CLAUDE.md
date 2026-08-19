@@ -177,8 +177,9 @@ workflows call `zig build release`, so it is the only place a target is named.
 
 `CHANGELOG.md` is generated from commit subjects by `zig build changelog`, and
 `publish` regenerates it. Never edit it. The commit subject is the entry, so
-write it for a user of whetuu, in the imperative, and put maintainer detail in
-the commit body instead. Work a user cannot observe goes in
+write it for a user of whetuu, in the imperative, and make it stand on its own.
+Commits here carry no body, so a subject that needs one to make sense is a
+subject that needs rewriting. Work a user cannot observe goes in
 `tools/changelog-skip.txt` by full SHA, rarely.
 
 A change that makes users do something to their machine before the new version
