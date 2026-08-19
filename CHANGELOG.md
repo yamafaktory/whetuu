@@ -3,6 +3,15 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.14 — 2026-08-19
+
+### Changed
+
+- Keep the bash hooks that were there before whetuu
+- Take back a whole search word with Ctrl+W
+- Measure a row in terminal columns, not codepoints
+- Say in CLAUDE.md that commits carry no body
+
 ## v0.1.13 — 2026-08-19
 
 ### Changed
