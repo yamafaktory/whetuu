@@ -377,7 +377,7 @@ const bonuses: [4][4]u8 = blk: {
                 .upper => char == .digit,
                 .digit => false,
             };
-            table[@intFromEnum(before)][@intFromEnum(char)] = switch (before) {
+            table[@backingInt(before)][@backingInt(char)] = switch (before) {
                 .other => bonus_boundary,
                 else => if (opens_word) bonus_camel else 0,
             };
@@ -390,7 +390,7 @@ const bonuses: [4][4]u8 = blk: {
 /// here and nowhere else, which is why it is read before the bytes are
 /// lowercased.
 fn positionBonus(prev: u8, char: u8) u8 {
-    return bonuses[@intFromEnum(kinds[prev])][@intFromEnum(kinds[char])];
+    return bonuses[@backingInt(kinds[prev])][@backingInt(kinds[char])];
 }
 
 /// The set of characters `text` contains, as one bit each. Letters and digits

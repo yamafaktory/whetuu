@@ -439,8 +439,8 @@ fn enterRaw(fd: posix.fd_t, original: posix.termios) !void {
     raw.lflag.ECHO = false;
     raw.lflag.ISIG = false;
     raw.lflag.IEXTEN = false;
-    raw.cc[@intFromEnum(posix.V.MIN)] = 0;
-    raw.cc[@intFromEnum(posix.V.TIME)] = 10;
+    raw.cc[@backingInt(posix.V.MIN)] = 0;
+    raw.cc[@backingInt(posix.V.TIME)] = 10;
 
     try posix.tcsetattr(fd, .FLUSH, raw);
 }
