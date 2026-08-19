@@ -3,6 +3,17 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.13 — 2026-08-19
+
+### Changed
+
+- Keep the fuzz and lint commits out of the changelog
+- Build against a newer Zig master
+
+### Fixed
+
+- Stop the picker crashing on a quoted brace expansion
+
 ## v0.1.12 — 2026-08-10
 
 ### Changed
