@@ -301,6 +301,7 @@ test {
     _ = @import("style.zig");
     _ = @import("time_ago.zig");
     _ = @import("version_cache.zig");
+    _ = @import("width.zig");
 }
 
 test "paths reports both files, and says so when there is nowhere to write" {

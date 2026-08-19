@@ -153,6 +153,11 @@ by someone deciding whether to use whetuu, so it has to be plain.
 - `zig build run -- <args>` — compile and run (e.g. `-- render --shell fish --status 0`)
 - `zig build release` — cross-compile + package a tarball per target into
   `zig-out/release/`; `-Dversion=vX.Y.Z` stamps `whetuu --version`
+- `zig build width -- <unicode-version>` — regenerate `src/width_table.zig` from
+  the Unicode Character Database, e.g. `-- 17.0.0`. Needs the network. Run it
+  when a new Unicode version is final, and never edit the table by hand. The
+  picker measures rows in terminal columns, so the table is what keeps a row of
+  CJK or emoji from landing in the wrong one
 - `zig build og` — render `docs/og.png`, the social card, from `tools/og.html`.
   Run it when the wordmark, palette or tagline changes, or the card starts
   disagreeing with the page it previews

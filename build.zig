@@ -79,6 +79,15 @@ pub fn build(b: *std.Build) void {
     og.stdio = .inherit;
     og_step.dependOn(&og.step);
 
+    // Regenerates the Unicode width table. Not part of any other step: it only
+    // changes when a new Unicode version comes out, and it needs the network.
+    const width_step = b.step("width", "Regenerate src/width_table.zig from the Unicode database");
+    const width = b.addSystemCommand(&.{"python3"});
+    width.addFileArg(b.path("tools/gen-width.py"));
+    width.addPassthruArgs();
+    width.stdio = .inherit;
+    width_step.dependOn(&width.step);
+
     // The version comes from `zig build publish -- v0.1.0` rather than
     // -Dversion, which stays reserved for stamping a local `release` build.
     const bump_step = b.step("bump", "Set the version in build.zig.zon (zig build bump -- vX.Y.Z)");

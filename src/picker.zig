@@ -25,6 +25,7 @@ const highlight = @import("highlight.zig");
 const search = @import("search.zig");
 const style = @import("style.zig");
 const time_ago = @import("time_ago.zig");
+const width_of = @import("width.zig");
 
 /// Central SGR escapes; the picker writes to the terminal directly, so it
 /// needs no shell wrapping.
@@ -424,14 +425,14 @@ fn dirLabel(arena: Allocator, cwd: []const u8, home: []const u8, max: usize) All
 /// re-measuring the remainder per column dropped — middle elision calls this on
 /// exactly the longest rows, where that difference is quadratic.
 fn tail(text: []const u8, cols: usize) []const u8 {
-    const total = width(text);
-    if (total <= cols) return text;
+    var left = width(text);
+    if (left <= cols) return text;
 
     var start: usize = 0;
-    var skip = total - cols;
-    while (skip > 0) : (skip -= 1) {
-        start += 1;
-        while (start < text.len and text[start] & 0xc0 == 0x80) start += 1;
+    while (left > cols and start < text.len) {
+        const s = width_of.step(text[start..]);
+        left -= s.cols;
+        start += s.bytes;
     }
 
     return text[start..];
@@ -1044,20 +1045,21 @@ fn appendSpaces(arena: Allocator, f: *std.ArrayList(u8), n: usize) !void {
     while (i < n) : (i += 1) try f.append(arena, ' ');
 }
 
-/// Column count of `text`, counting each codepoint as one column so multibyte
-/// glyphs are not overcounted by their byte length.
+/// Column count of `text`, as the terminal will draw it.
 fn width(text: []const u8) usize {
-    return std.unicode.utf8CountCodepoints(text) catch text.len;
+    return width_of.columns(text);
 }
 
 /// The prefix of `text` that fits `cols` columns, cut on a UTF-8 boundary so a
 /// multibyte glyph is never split mid-sequence. The mirror of `tail`.
 fn head(text: []const u8, cols: usize) []const u8 {
     var end: usize = 0;
-    var seen: usize = 0;
-    while (end < text.len and seen < cols) : (seen += 1) {
-        end += 1;
-        while (end < text.len and text[end] & 0xc0 == 0x80) end += 1;
+    var used: usize = 0;
+    while (end < text.len) {
+        const s = width_of.step(text[end..]);
+        if (used + s.cols > cols) break;
+        used += s.cols;
+        end += s.bytes;
     }
 
     return text[0..end];
@@ -1617,8 +1619,9 @@ fn visibleWidth(text: []const u8) usize {
             i += 1;
             continue;
         }
-        if (text[i] & 0xc0 != 0x80) cols += 1;
-        i += 1;
+        const st = width_of.step(text[i..]);
+        cols += st.cols;
+        i += st.bytes;
     }
 
     return cols;
@@ -1652,6 +1655,42 @@ test "Enter and Tab take the same command and differ only in what happens to it"
     // Neither a match nor a query is nothing to hand over.
     try std.testing.expect(accept("   ", &.{}, 0, .run) == null);
     try std.testing.expect(accept("", &.{}, 0, .edit) == null);
+}
+
+test "head and tail measure wide characters as two columns" {
+    // Two characters, four columns. A three column cap fits only the first,
+    // since half of a wide character cannot be drawn.
+    const ni_hao = "\u{4f60}\u{597d}";
+    try std.testing.expectEqual(@as(usize, 4), width(ni_hao));
+    try std.testing.expectEqualStrings("", head(ni_hao, 1));
+    try std.testing.expectEqualStrings("\u{4f60}", head(ni_hao, 2));
+    try std.testing.expectEqualStrings("\u{4f60}", head(ni_hao, 3));
+    try std.testing.expectEqualStrings(ni_hao, head(ni_hao, 4));
+
+    try std.testing.expectEqualStrings("\u{597d}", tail(ni_hao, 2));
+    try std.testing.expectEqualStrings("\u{597d}", tail(ni_hao, 3));
+    try std.testing.expectEqualStrings(ni_hao, tail(ni_hao, 4));
+
+    // Whatever they return has to fit the cap they were given.
+    for (0..8) |cap| {
+        try std.testing.expect(width(head(ni_hao, cap)) <= cap);
+        try std.testing.expect(width(tail(ni_hao, cap)) <= cap);
+    }
+}
+
+test "a row of wide characters is padded to the width it really draws" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // The selected row is painted across the whole terminal. Measured in
+    // codepoints this command reads as 20 columns when it draws as 40, and the
+    // bar stopped 20 short of the edge.
+    const wide_cmd = "echo \u{4f60}\u{597d}\u{4f60}\u{597d}\u{4f60}\u{597d}";
+    var row: std.ArrayList(u8) = .empty;
+    const painted = try appendEntry(a, &row, .{ .command = wide_cmd, .timestamp = 40 }, 100, true, 80);
+    try std.testing.expectEqual(@as(usize, 80), painted);
+    try std.testing.expectEqual(@as(usize, 80), visibleWidth(row.items));
 }
 
 test "head and tail cut on a utf-8 boundary and measure in columns" {
