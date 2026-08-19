@@ -214,7 +214,7 @@ const Scanner = struct {
             }
 
             try scanner.emit(.string, raw[run..j]);
-            j = try scanner.expansion(raw, j, .string);
+            j = try scanner.expansion(raw[0..end], j, .string);
             run = j;
         }
 
@@ -424,6 +424,11 @@ test "a dollar that expands to nothing belongs to its surroundings" {
 test "an assignment prefix does not consume the command position" {
     try expectMap("RUST_LOG=debug cargo run", "vvvvvvvvv      ccccc    ");
     try expectMap("A=1 B=2 ls", "vv  vv  cc");
+}
+
+test "a brace expansion cannot reach past the quote that contains it" {
+    try expectMap("\"${a\"}", "svvvvc");
+    try expectMap("echo \"${a\"}", "cccc svvvv ");
 }
 
 test "an unterminated quote runs to the end rather than dropping text" {
