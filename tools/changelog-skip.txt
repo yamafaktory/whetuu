@@ -20,3 +20,7 @@ c09fb14497e5de76847d317133b012f0f4d55718  Make publish cut a release end to end
 0663c8afe20b5dfb918d83721d15077504404875  Simplify the README prose
 182f872fcb67fde74e53cbef3223f340afb632a6  Restore the tagline as the README opening line
 84f748a79ec7bd48ae2bec940266c4a6ba997b0b  Note that the site deploys on push, not on release
+
+# Test and lint machinery. It guards the code without changing any of it.
+44e3b83d5cba627a7801240797516e8ade9774e9  Fuzz the parsers behind the status line and the picker
+38d272468890d9ae1f3c6e6c5c958c213e3e5618  Lint the tools and the shell integration in CI
