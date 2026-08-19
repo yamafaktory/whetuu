@@ -3,6 +3,12 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.15 — 2026-08-19
+
+### Added
+
+- Add whetuu upgrade, and a status line notice when a release is out
+
 ## v0.1.14 — 2026-08-19
 
 ### Changed
