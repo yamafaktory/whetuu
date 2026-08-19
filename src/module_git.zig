@@ -424,3 +424,18 @@ test "clean in-sync tree shows no status" {
 
     try std.testing.expect((try statusText(arena.allocator(), .{})) == null);
 }
+
+test "any bytes git hands back parse into a status" {
+    const Context = struct {
+        fn testOne(_: @This(), smith: *std.testing.Smith) anyerror!void {
+            var buf: [512]u8 = undefined;
+            const raw = buf[0..smith.slice(&buf)];
+
+            const info = parse(raw);
+            try std.testing.expect(info.branch.len <= raw.len);
+            try std.testing.expect(std.mem.indexOfScalar(u8, info.branch, ' ') == null);
+            try std.testing.expect(!(info.detached and info.branch.len > 0));
+        }
+    };
+    return std.testing.fuzz(Context{}, Context.testOne, .{});
+}

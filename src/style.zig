@@ -363,3 +363,21 @@ test "rgb emits a truecolor escape and overrides color" {
     try write(&w, .fish, .{ .bold = true, .rgb = .{ .r = 168, .g = 85, .b = 247 } }, "z");
     try std.testing.expectEqualStrings("\x1b[1;38;2;168;85;247mz\x1b[0m", w.buffered());
 }
+
+test "sanitize makes any bytes at all drawable" {
+    const Context = struct {
+        fn testOne(_: @This(), smith: *std.testing.Smith) anyerror!void {
+            var buf: [256]u8 = undefined;
+            const text = buf[0..smith.slice(&buf)];
+
+            var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+            defer arena.deinit();
+
+            const safe = try sanitize(arena.allocator(), text);
+            try std.testing.expect(std.unicode.utf8ValidateSlice(safe));
+            try std.testing.expect(safe.len <= text.len);
+            for (safe) |c| try std.testing.expect(!isControlByte(c));
+        }
+    };
+    return std.testing.fuzz(Context{}, Context.testOne, .{});
+}

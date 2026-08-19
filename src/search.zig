@@ -721,3 +721,25 @@ test "frecency weighs how often against how recently" {
     // A clock that ran backwards leaves a future timestamp, which is recent.
     try std.testing.expectEqual(frecency(1, 0), frecency(1, -500));
 }
+
+test "the prefilter never rejects a command the subsequence test accepts" {
+    const Context = struct {
+        fn testOne(_: @This(), smith: *std.testing.Smith) anyerror!void {
+            var command_buf: [max_width]u8 = undefined;
+            var query_buf: [32]u8 = undefined;
+            const command = command_buf[0..smith.slice(&command_buf)];
+            const query = query_buf[0..smith.slice(&query_buf)];
+            for (query) |*c| c.* = 0x20 + (c.* % 0x5f);
+
+            var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+            defer arena.deinit();
+            const a = arena.allocator();
+
+            const corpus: Corpus = try .prepare(a, &.{command});
+            var out: [1]u16 = undefined;
+            try corpus.scoreAll(a, query, &out);
+            try std.testing.expectEqual(matches(command, query), out[0] > 0);
+        }
+    };
+    return std.testing.fuzz(Context{}, Context.testOne, .{});
+}

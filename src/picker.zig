@@ -1586,3 +1586,24 @@ test "head and tail cut on a utf-8 boundary and measure in columns" {
     try std.testing.expectEqualStrings("\xc2\xb7c", tail("a\xc2\xb7c", 2));
     try std.testing.expectEqualStrings("bc", tail("abc", 2));
 }
+
+test "a row is one clean line whatever was stored" {
+    const Context = struct {
+        fn testOne(_: @This(), smith: *std.testing.Smith) anyerror!void {
+            var buf: [256]u8 = undefined;
+            const text = buf[0..smith.slice(&buf)];
+
+            var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+            defer arena.deinit();
+
+            const row = try oneLine(arena.allocator(), text);
+            try std.testing.expect(std.unicode.utf8ValidateSlice(row));
+            for (row) |c| try std.testing.expect(!style.isControlByte(c));
+            try std.testing.expect(std.mem.indexOf(u8, row, "  ") == null);
+            if (row.len == 0) return;
+            try std.testing.expect(row[0] != ' ');
+            try std.testing.expect(row[row.len - 1] != ' ');
+        }
+    };
+    return std.testing.fuzz(Context{}, Context.testOne, .{});
+}

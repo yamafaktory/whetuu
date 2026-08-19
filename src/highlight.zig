@@ -464,3 +464,24 @@ test "row colors are distinct and bar tints stay bright enough to read on purple
         try std.testing.expect(@as(u16, bar.r) + bar.g + bar.b > 500);
     }
 }
+
+test "every token together is exactly the command that went in" {
+    const Context = struct {
+        fn testOne(_: @This(), smith: *std.testing.Smith) anyerror!void {
+            var buf: [256]u8 = undefined;
+            const raw = buf[0..smith.slice(&buf)];
+
+            var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+            defer arena.deinit();
+            const a = arena.allocator();
+
+            const command = try @import("style.zig").sanitize(a, raw);
+            const tokens = try tokenize(a, command);
+
+            var rebuilt: std.ArrayList(u8) = .empty;
+            for (tokens) |token| try rebuilt.appendSlice(a, token.text);
+            try std.testing.expectEqualStrings(command, rebuilt.items);
+        }
+    };
+    return std.testing.fuzz(Context{}, Context.testOne, .{});
+}

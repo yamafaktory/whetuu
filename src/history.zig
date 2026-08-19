@@ -516,3 +516,40 @@ test "storePath prefers XDG_DATA_HOME then HOME" {
     try std.testing.expectEqualStrings("/home/davy/.local/share/whetuu/history", (try storePath(a, "", "/home/davy")).?);
     try std.testing.expect((try storePath(a, "", "")) == null);
 }
+
+test "any command at all survives a store round trip" {
+    const Context = struct {
+        fn testOne(_: @This(), smith: *std.testing.Smith) anyerror!void {
+            var buf: [256]u8 = undefined;
+            const cmd = buf[0..smith.slice(&buf)];
+            try expectRoundTrip(cmd);
+
+            var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+            defer arena.deinit();
+
+            const escaped = try escape(arena.allocator(), cmd);
+            try std.testing.expect(std.mem.indexOfScalar(u8, escaped, '\n') == null);
+            try std.testing.expect(std.mem.indexOfScalar(u8, escaped, '\t') == null);
+        }
+    };
+    return std.testing.fuzz(Context{}, Context.testOne, .{});
+}
+
+test "a store of arbitrary bytes still loads" {
+    const Context = struct {
+        fn testOne(_: @This(), smith: *std.testing.Smith) anyerror!void {
+            var buf: [512]u8 = undefined;
+            const bytes = buf[0..smith.slice(&buf)];
+
+            var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+            defer arena.deinit();
+
+            for (try dedupe(arena.allocator(), bytes)) |entry| {
+                try std.testing.expect(entry.command.len <= bytes.len);
+                try std.testing.expect(entry.cwd.len <= bytes.len);
+                try std.testing.expect(entry.count > 0);
+            }
+        }
+    };
+    return std.testing.fuzz(Context{}, Context.testOne, .{});
+}
