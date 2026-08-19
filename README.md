@@ -381,6 +381,8 @@ yet. A bar at the top names both scopes and highlights the active one, like
   ignoring case
 - **Backspace / Delete** — drop the last character of the search. The cursor
   never leaves the end of it, so the two keys do the same thing
+- **Ctrl+W / Alt+Backspace** — drop the last word of the search. A word here is
+  what the search itself splits on, so one press takes one search word
 - **↑ / ↓** — move the selection, where ↑ goes further back in time
 - **Home / End** — jump to the newest command or to the oldest one on the list
 - **Ctrl+G** — switch between this directory's history and all history

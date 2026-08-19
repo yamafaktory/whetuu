@@ -60,6 +60,7 @@ const Key = union(enum) {
     enter,
     tab,
     backspace,
+    kill_word,
     up,
     down,
     newest,
@@ -214,6 +215,10 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?Choi
                 if (popCodepoint(&query)) refilter = true;
                 selected = 0;
             },
+            .kill_word => {
+                if (popWord(&query)) refilter = true;
+                selected = 0;
+            },
             .char => |c| {
                 query.append(arena, c) catch {};
                 selected = 0;
@@ -261,6 +266,28 @@ fn popCodepoint(query: *std.ArrayList(u8)) bool {
     while (len < query.items.len and query.items[query.items.len - len] & 0xc0 == 0x80) len += 1;
     query.items.len -= len;
     return true;
+}
+
+/// Drops the last whitespace-delimited word of `query`, and the whitespace
+/// trailing it, reporting whether anything went. Whitespace is what separates
+/// one search token from the next, so this removes exactly one token rather
+/// than however much of a word each shell would call one.
+///
+/// Scanning bytes rather than codepoints is safe: a continuation byte is always
+/// 0x80 or above, so it can never be mistaken for the space that ends the scan.
+fn popWord(query: *std.ArrayList(u8)) bool {
+    const before = query.items.len;
+    var len = before;
+    while (len > 0 and isQuerySpace(query.items[len - 1])) len -= 1;
+    while (len > 0 and !isQuerySpace(query.items[len - 1])) len -= 1;
+    query.items.len = len;
+    return len != before;
+}
+
+/// The bytes that separate one search token from the next, which is exactly
+/// what `search.matches` splits a query on.
+fn isQuerySpace(c: u8) bool {
+    return c == ' ' or c == '\t';
 }
 
 /// Returns the entries `scope` admits, order preserved. The `.dir` scope keeps
@@ -462,6 +489,7 @@ fn decodeKey(bytes: []const u8) Decoded {
         '\t' => .tab,
         0x07 => .scope, // Ctrl+G
         0x7f, 0x08 => .backspace,
+        0x17 => .kill_word, // Ctrl+W
         0x03, 0x04 => .cancel,
         else => if (bytes[0] >= 0x20 and bytes[0] < 0x7f) Key{ .char = bytes[0] } else .other,
     };
@@ -480,6 +508,12 @@ fn decodeEscape(bytes: []const u8) Decoded {
     // arrows and for Home and End. The shell integrations bind both forms for
     // the same reason.
     if (bytes.len >= 3 and bytes[1] == 'O') return .{ .key = finalKey(bytes[2], ""), .len = 3 };
+
+    // Alt+Backspace, which every one of the three shells binds to killing the
+    // word behind the cursor. Terminals send it as escape then whichever byte
+    // they send for a bare Backspace.
+    if (bytes.len >= 2 and (bytes[1] == 0x7f or bytes[1] == 0x08)) return .{ .key = .kill_word, .len = 2 };
+
     if (bytes.len < 3 or bytes[1] != '[') return .{ .key = .cancel, .len = 1 };
 
     // CSI: parameter bytes, then intermediates, then the one final byte that
@@ -696,6 +730,51 @@ test "backspace drops a whole character, not one byte of one" {
 
     query.clearRetainingCapacity();
     try std.testing.expect(!popCodepoint(&query));
+}
+
+test "ctrl+w and alt+backspace both kill a word" {
+    try expectKeys("\x17", &.{"kill_word"});
+    try expectKeys("\x1b\x7f", &.{"kill_word"});
+    try expectKeys("\x1b\x08", &.{"kill_word"});
+
+    // The whole sequence is consumed, so the backspace byte is not left to be
+    // read again as a bare Backspace.
+    try expectKeys("a\x1b\x7fb", &.{ "'a'", "kill_word", "'b'" });
+}
+
+test "killing a word drops one search token and the space before the next" {
+    var query: std.ArrayList(u8) = .empty;
+    defer query.deinit(std.testing.allocator);
+
+    try query.appendSlice(std.testing.allocator, "git commit -m");
+    try std.testing.expect(popWord(&query));
+    try std.testing.expectEqualStrings("git commit ", query.items);
+    try std.testing.expect(popWord(&query));
+    try std.testing.expectEqualStrings("git ", query.items);
+    try std.testing.expect(popWord(&query));
+    try std.testing.expectEqualStrings("", query.items);
+
+    // Nothing left to take.
+    try std.testing.expect(!popWord(&query));
+
+    // Trailing spaces go with the word they follow, so one press is enough.
+    query.clearRetainingCapacity();
+    try query.appendSlice(std.testing.allocator, "zig build   ");
+    try std.testing.expect(popWord(&query));
+    try std.testing.expectEqualStrings("zig ", query.items);
+
+    // A multibyte word goes whole, never a byte of it.
+    query.clearRetainingCapacity();
+    try query.appendSlice(std.testing.allocator, "caf\xc3\xa9 na\xc3\xafve");
+    try std.testing.expect(popWord(&query));
+    try std.testing.expectEqualStrings("caf\xc3\xa9 ", query.items);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(query.items));
+
+    // Whitespace alone still counts as something to take.
+    query.clearRetainingCapacity();
+    try query.appendSlice(std.testing.allocator, "   ");
+    try std.testing.expect(popWord(&query));
+    try std.testing.expectEqualStrings("", query.items);
 }
 
 test "a burst mixing text and control keys decodes in order" {
