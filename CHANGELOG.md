@@ -3,6 +3,14 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.16 — 2026-09-09
+
+### Changed
+
+- Build against a newer Zig master
+- Clear the whole search with Ctrl+U
+- Move the picker's selection with Ctrl+P and Ctrl+N
+
 ## v0.1.15 — 2026-08-19
 
 ### Added
