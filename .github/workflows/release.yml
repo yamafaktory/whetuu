@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 env:
-  ZIG_VERSION: 0.17.0-dev.1811+6716bf52e
+  ZIG_VERSION: 0.17.0-dev.2085+5e36170b5
 
 jobs:
   release:
