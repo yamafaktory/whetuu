@@ -62,6 +62,7 @@ const Key = union(enum) {
     tab,
     backspace,
     kill_word,
+    kill_line,
     up,
     down,
     newest,
@@ -218,6 +219,11 @@ pub fn pick(io: Io, arena: Allocator, items: []const Entry, opts: Options) ?Choi
             },
             .kill_word => {
                 if (popWord(&query)) refilter = true;
+                selected = 0;
+            },
+            .kill_line => {
+                if (query.items.len > 0) refilter = true;
+                query.clearRetainingCapacity();
                 selected = 0;
             },
             .char => |c| {
@@ -491,6 +497,7 @@ fn decodeKey(bytes: []const u8) Decoded {
         0x07 => .scope, // Ctrl+G
         0x7f, 0x08 => .backspace,
         0x17 => .kill_word, // Ctrl+W
+        0x15 => .kill_line, // Ctrl+U
         0x03, 0x04 => .cancel,
         else => if (bytes[0] >= 0x20 and bytes[0] < 0x7f) Key{ .char = bytes[0] } else .other,
     };
@@ -714,6 +721,33 @@ test "Home and End jump to the ends of the list, Delete backspaces" {
     // Nothing is ever ahead of the cursor, which is parked at the end of the
     // query, so Delete removes the character behind it.
     try expectKeys("\x1b[3~", &.{"backspace"});
+}
+
+test "the readline editing keys every shell already binds work in the picker" {
+    // A shell seeds the query with the command line, so arriving with a long
+    // one and wanting a fresh search is the common case. Ctrl+U is what every
+    // shell binds to clearing the line, and it used to be swallowed as `other`.
+    try expectKeys("\x15", &.{"kill_line"});
+    try expectKeys("\x17", &.{"kill_word"});
+    try expectKeys("\x1b\x7f", &.{"kill_word"});
+}
+
+test "clearing the line drops in one key what the word key takes several to" {
+    var query: std.ArrayList(u8) = .empty;
+    defer query.deinit(std.testing.allocator);
+    try query.appendSlice(std.testing.allocator, "git commit café");
+
+    // The word key leaves the separator behind, so it never reaches empty in
+    // one go. That is the whole reason Ctrl+U is worth binding.
+    try std.testing.expect(popWord(&query));
+    try std.testing.expectEqualStrings("git commit ", query.items);
+
+    query.clearRetainingCapacity();
+    try std.testing.expectEqualStrings("", query.items);
+
+    // Nothing left to take, which is what makes the dispatch skip the refilter.
+    try std.testing.expect(!popWord(&query));
+    try std.testing.expect(!popCodepoint(&query));
 }
 
 test "backspace drops a whole character, not one byte of one" {
