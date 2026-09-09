@@ -440,7 +440,8 @@ yet. A bar at the top names both scopes and highlights the active one, like
   what the search itself splits on, so one press takes one search word
 - **Ctrl+U** — clear the search. The picker opens with whatever you had already
   typed, so this is how you start a fresh one
-- **↑ / ↓** — move the selection, where ↑ goes further back in time
+- **↑ / ↓ / Ctrl+P / Ctrl+N** — move the selection, where ↑ goes further back in
+  time
 - **Home / End** — jump to the newest command or to the oldest one on the list
 - **Ctrl+G** — switch between this directory's history and all history
 - **Enter** — run the selected command. A search that matches nothing runs as

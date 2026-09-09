@@ -498,6 +498,8 @@ fn decodeKey(bytes: []const u8) Decoded {
         0x7f, 0x08 => .backspace,
         0x17 => .kill_word, // Ctrl+W
         0x15 => .kill_line, // Ctrl+U
+        0x10 => .up, // Ctrl+P
+        0x0e => .down, // Ctrl+N
         0x03, 0x04 => .cancel,
         else => if (bytes[0] >= 0x20 and bytes[0] < 0x7f) Key{ .char = bytes[0] } else .other,
     };
@@ -730,6 +732,16 @@ test "the readline editing keys every shell already binds work in the picker" {
     try expectKeys("\x15", &.{"kill_line"});
     try expectKeys("\x17", &.{"kill_word"});
     try expectKeys("\x1b\x7f", &.{"kill_word"});
+}
+
+test "Ctrl+P and Ctrl+N move the selection like the arrows" {
+    try expectKeys("\x10", &.{"up"});
+    try expectKeys("\x0e", &.{"down"});
+
+    // Ctrl+J cannot join them: a terminal sends it as the same 0x0a a bare
+    // Enter does, so binding it to the selection would stop Enter running the
+    // choice.
+    try expectKeys("\x0a", &.{"enter"});
 }
 
 test "clearing the line drops in one key what the word key takes several to" {
