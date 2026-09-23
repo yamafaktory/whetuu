@@ -35,12 +35,17 @@ few minutes later, at
 
 ## What CI checks
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs three jobs on every
-push and every pull request. `zig build publish` waits on the whole run, so any
-one of them going red stops a release.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs four jobs on every
+push to `main` and every pull request. `zig build publish` waits on the whole
+run, so any one of them going red stops a release. A branch gets CI once it has
+a pull request, a draft one included.
 
 - **Format, check, test** — `zig fmt --check`, `zig build check` and
   `zig build test`.
+- **Test on macOS** — `zig build test` on a macOS runner. The release ships
+  for macOS, and file locks, inode numbers and renames behave differently
+  there. The end to end scripts stay on Linux: `test-init.sh` needs the bash 5
+  that macOS does not ship.
 - **Lint the tools and the shell integration** — `ruff` over `tools/`, then
   `shellcheck` over `tools/*.sh`, `docs/install.sh` and `assets/init.bash`.
   shellcheck reads sh and bash only. `assets/init.zsh` and `assets/init.fish`
