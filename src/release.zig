@@ -45,8 +45,14 @@ pub const Checked = struct {
 /// on every render, and an arena that has to grow costs an mmap to answer a
 /// question a stack buffer answers for nothing.
 pub fn cachePath(buf: []u8, xdg_cache_home: []const u8, home: []const u8) ?[]const u8 {
-    if (xdg_cache_home.len > 0) return std.fmt.bufPrint(buf, "{s}/whetuu/release", .{xdg_cache_home}) catch null;
-    if (home.len > 0) return std.fmt.bufPrint(buf, "{s}/.cache/whetuu/release", .{home}) catch null;
+    return cacheFile(buf, xdg_cache_home, home, "release");
+}
+
+/// Absolute path of the file `name` in whetuu's cache directory, written into
+/// `buf`. Null when neither variable is set.
+pub fn cacheFile(buf: []u8, xdg_cache_home: []const u8, home: []const u8, name: []const u8) ?[]const u8 {
+    if (xdg_cache_home.len > 0) return std.fmt.bufPrint(buf, "{s}/whetuu/{s}", .{ xdg_cache_home, name }) catch null;
+    if (home.len > 0) return std.fmt.bufPrint(buf, "{s}/.cache/whetuu/{s}", .{ home, name }) catch null;
     return null;
 }
 

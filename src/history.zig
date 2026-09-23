@@ -19,6 +19,8 @@ const Allocator = std.mem.Allocator;
 const Dir = std.Io.Dir;
 const Io = std.Io;
 
+const secret = @import("secret.zig");
+
 /// How much of the store a load reads, taken from the end. This bounds what an
 /// open costs without bounding what the store keeps: a larger file still holds
 /// every line, and only the oldest stop being offered to the picker. At a
@@ -53,7 +55,9 @@ pub const Entry = struct {
 ///
 /// A command that starts with a space or tab is not recorded at all — the
 /// long-standing shell convention for "keep this one out of history", and the
-/// only way to keep a secret typed on the command line out of the store.
+/// surest way to keep a secret typed on the command line out of the store.
+///
+/// A command `refuses` rejects is not recorded either.
 ///
 /// Neither is a command that is not valid UTF-8. Binary reaches a command line
 /// more easily than it sounds — paste an image into the terminal and the shell
@@ -67,6 +71,7 @@ pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd:
     const trimmed = std.mem.trim(u8, command, " \t\r\n");
     if (trimmed.len == 0) return;
     if (!std.unicode.utf8ValidateSlice(trimmed)) return;
+    if (refuses(trimmed)) return;
 
     if (std.fs.path.dirname(path)) |dir| {
         Dir.cwd().createDirPath(io, dir) catch |err| switch (err) {
@@ -81,7 +86,7 @@ pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd:
     else
         try std.fmt.allocPrint(arena, "{d}\t{s}\n", .{ now, cmd });
 
-    var file = try Dir.createFileAbsolute(io, path, .{ .truncate = false, .lock = .exclusive, .permissions = .fromMode(0o600) });
+    var file = try openLocked(io, path);
     defer file.close(io);
 
     // Command lines routinely hold paths and secrets, so the store must stay
@@ -94,6 +99,226 @@ pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd:
     writer.pos = try file.length(io);
     try writer.interface.writeAll(line);
     try writer.interface.flush();
+}
+
+/// True when a command must never be kept. It holds something shaped like a
+/// credential (see `secret.zig`), or it is a `whetuu scrub` naming the text to
+/// remove, which is usually the leaked secret itself.
+pub fn refuses(command: []const u8) bool {
+    return secret.contains(command) or isScrub(command);
+}
+
+fn isScrub(command: []const u8) bool {
+    var words = std.mem.tokenizeAny(u8, command, " \t\n");
+    const program = words.next() orelse return false;
+    const sub = words.next() orelse return false;
+    return std.mem.eql(u8, std.fs.path.basename(program), "whetuu") and std.mem.eql(u8, sub, "scrub");
+}
+
+test "a whetuu scrub line is refused, since its text is often the secret" {
+    try std.testing.expect(refuses("whetuu scrub hunter2"));
+    try std.testing.expect(refuses("~/.local/bin/whetuu  scrub --dry-run hunter2"));
+    try std.testing.expect(!refuses("whetuu paths"));
+    try std.testing.expect(!refuses("echo whetuu scrub"));
+    try std.testing.expect(!refuses("whetuu"));
+}
+
+/// What a scrub found: the entries it removed, oldest first, out of `total`
+/// stored commands.
+pub const Scrub = struct {
+    removed: []const Entry,
+    total: usize,
+};
+
+/// Removes from the store every command `refuses` rejects today, and every one
+/// containing `text` when that is not empty. The patterns grow from release to
+/// release, so this is how a store recorded under older ones catches up.
+///
+/// Reads the whole file, not the window `load` reads, since the oldest lines
+/// are exactly the ones a new pattern has never seen. Every other line is kept
+/// byte for byte. The result is staged beside the store, synced, and renamed
+/// over it while the store's lock is held, so a crash leaves the old store or
+/// the new one and never half of each. A store with nothing to remove is not
+/// rewritten, and `dry_run` never rewrites it.
+pub fn scrub(io: Io, arena: Allocator, path: []const u8, text: []const u8, dry_run: bool) !Scrub {
+    _ = Dir.cwd().statFile(io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return .{ .removed = &.{}, .total = 0 },
+        else => return err,
+    };
+
+    var file = try openLocked(io, path);
+    defer file.close(io);
+
+    const size: usize = @intCast(try file.length(io));
+    const bytes = try arena.alloc(u8, size);
+    const read = try file.readPositionalAll(io, bytes, 0);
+
+    var removed: std.ArrayList(Entry) = .empty;
+    var kept: std.ArrayList(u8) = .empty;
+    try kept.ensureTotalCapacity(arena, read + 1);
+    var total: usize = 0;
+
+    var lines = std.mem.splitScalar(u8, bytes[0..read], '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        total += 1;
+
+        const entry = try parse(arena, line);
+        if (!matches(entry.command, text)) {
+            kept.appendSliceAssumeCapacity(line);
+            kept.appendAssumeCapacity('\n');
+            continue;
+        }
+        try removed.append(arena, entry);
+    }
+
+    const result: Scrub = .{ .removed = removed.items, .total = total };
+    if (dry_run or removed.items.len == 0) return result;
+
+    try replaceWith(io, path, kept.items);
+    return result;
+}
+
+fn matches(command: []const u8, text: []const u8) bool {
+    return refuses(command) or (text.len > 0 and std.mem.find(u8, command, text) != null);
+}
+
+fn replaceWith(io: Io, path: []const u8, bytes: []const u8) !void {
+    var dir = try Dir.openDirAbsolute(io, std.fs.path.dirname(path) orelse return error.FileNotFound, .{});
+    defer dir.close(io);
+
+    var staged = try dir.createFileAtomic(io, std.fs.path.basename(path), .{
+        .permissions = .fromMode(0o600),
+        .replace = true,
+    });
+    defer staged.deinit(io);
+
+    var buf: [4096]u8 = undefined;
+    var writer = staged.file.writer(io, &buf);
+    try writer.interface.writeAll(bytes);
+    try writer.interface.flush();
+    try staged.file.sync(io);
+    try staged.replace(io);
+}
+
+test "scrub removes what the patterns or the text match, and keeps the rest byte for byte" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try std.fs.path.join(a, &.{ dir, "history" });
+
+    const before =
+        "10\t/w\tgit status\n" ++
+        "11\t/w\tgit clone https://me:hunter2@example.com/r.git\n" ++
+        "12\tlegacy line\n" ++
+        "13\t/w\tmysql -u root -pinternal-pw\n" ++
+        "14\t/w\tfor f in *\\ndo echo\\ndone\n";
+    try tmp.dir.writeFile(io, .{ .sub_path = "history", .data = before });
+
+    const dry = try scrub(io, a, path, "internal-pw", true);
+    try std.testing.expectEqual(@as(usize, 5), dry.total);
+    try std.testing.expectEqual(@as(usize, 2), dry.removed.len);
+    try std.testing.expectEqualStrings(before, try tmp.dir.readFileAlloc(io, "history", a, .unlimited));
+
+    const done = try scrub(io, a, path, "internal-pw", false);
+    try std.testing.expectEqual(@as(usize, 2), done.removed.len);
+    try std.testing.expectEqualStrings("git clone https://me:hunter2@example.com/r.git", done.removed[0].command);
+    try std.testing.expectEqualStrings("mysql -u root -pinternal-pw", done.removed[1].command);
+    try std.testing.expectEqualStrings(
+        "10\t/w\tgit status\n" ++
+            "12\tlegacy line\n" ++
+            "14\t/w\tfor f in *\\ndo echo\\ndone\n",
+        try tmp.dir.readFileAlloc(io, "history", a, .unlimited),
+    );
+
+    const again = try scrub(io, a, path, "", false);
+    try std.testing.expectEqual(@as(usize, 3), again.total);
+    try std.testing.expectEqual(@as(usize, 0), again.removed.len);
+}
+
+test "scrub on a store that does not exist yet finds nothing and creates nothing" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try std.fs.path.join(a, &.{ dir, "history" });
+
+    const got = try scrub(io, a, path, "", false);
+    try std.testing.expectEqual(@as(usize, 0), got.total);
+    try std.testing.expectError(error.FileNotFound, tmp.dir.statFile(io, "history", .{}));
+}
+
+/// Opens the store for appending under an exclusive lock. Rewriting the store
+/// renames a new file over the path while holding the same lock, so a writer
+/// that opened the old file before the rename and then waited on its lock would
+/// append to a file nobody reads again. Reopening until the locked file is the
+/// one at the path closes that gap. The retries are bounded because some file
+/// systems do not keep inode numbers stable, and there a write that may be lost
+/// is better than one that never finishes.
+fn openLocked(io: Io, path: []const u8) !Io.File {
+    const options: Dir.CreateFileOptions = .{
+        .read = true,
+        .truncate = false,
+        .lock = .exclusive,
+        .permissions = .fromMode(0o600),
+    };
+    for (0..3) |_| {
+        const file = try Dir.createFileAbsolute(io, path, options);
+        if (isAt(io, file, path)) return file;
+        file.close(io);
+    }
+    return Dir.createFileAbsolute(io, path, options);
+}
+
+/// True when `file` is still the file at `path`. A file that cannot be
+/// inspected counts as current, so the check never blocks a write.
+fn isAt(io: Io, file: Io.File, path: []const u8) bool {
+    const open = file.stat(io) catch return true;
+    const at = Dir.cwd().statFile(io, path, .{}) catch return false;
+    return open.inode == at.inode;
+}
+
+test "a store replaced after it was opened is no longer the one at its path" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try std.fs.path.join(a, &.{ dir, "history" });
+    const replacement = try std.fs.path.join(a, &.{ dir, "history.new" });
+
+    try add(io, a, path, "ls", "/w", 10);
+    const stale = try Dir.openFileAbsolute(io, path, .{});
+    defer stale.close(io);
+    try std.testing.expect(isAt(io, stale, path));
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "history.new", .data = "20\t/w\tpwd\n" });
+    try Dir.renameAbsolute(replacement, path, io);
+    try std.testing.expect(!isAt(io, stale, path));
+
+    try add(io, a, path, "git status", "/w", 30);
+    const stored = try load(io, a, path);
+    try std.testing.expectEqual(@as(usize, 2), stored.len);
+    try std.testing.expectEqualStrings("git status", stored[0].command);
+    try std.testing.expectEqualStrings("pwd", stored[1].command);
 }
 
 /// Reads the history file and returns its unique entries, newest first. A
@@ -195,6 +420,28 @@ test "a command that is not text never reaches the store" {
     try std.testing.expectEqual(@as(usize, 2), stored.len);
     try std.testing.expectEqualStrings("for f in *.zig\ndo\n\techo $f\ndone", stored[0].command);
     try std.testing.expectEqualStrings("git commit -m 'plan — done'", stored[1].command);
+}
+
+test "a command holding a credential never reaches the store" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try std.fs.path.join(a, &.{ dir, "history" });
+
+    try add(io, a, path, "git clone https://me:hunter2@example.com/r.git", "/w", 30);
+    try add(io, a, path, "curl -H 'Authorization: Bearer abcdefgh123' https://api", "/w", 31);
+    try add(io, a, path, "export GITHUB_TOKEN=$(gh auth token)", "/w", 32);
+
+    const stored = try load(io, a, path);
+    try std.testing.expectEqual(@as(usize, 1), stored.len);
+    try std.testing.expectEqualStrings("export GITHUB_TOKEN=$(gh auth token)", stored[0].command);
 }
 
 /// Remembers which (directory, command) pairs a load has already offered and

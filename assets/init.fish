@@ -13,9 +13,14 @@ end
 # A command that did not exit 0 is also kept in $__whetuu_failed, so the picker
 # can show it at the top without ever storing it. The slot lives until the next
 # command finishes. A clean exit, or a command opted out of history with a
-# leading space, clears it instead.
+# leading space or by fish_should_add_to_history, clears it instead.
 function __whetuu_postexec --on-event fish_postexec
     set -l last_status $status
+    if functions -q fish_should_add_to_history; and not fish_should_add_to_history $argv
+        set -e __whetuu_failed
+        set -e __whetuu_failed_at
+        return
+    end
     command whetuu history add --status $last_status -- $argv
     if test $last_status -ne 0; and not string match -qr '^\s' -- "$argv"
         set -g __whetuu_failed $argv

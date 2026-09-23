@@ -153,11 +153,12 @@ whetuu reads your repository and prints a line. Here is what that involves.
   `~/.local/bin` is not already on your `PATH`. Set `WHETUU_NO_MODIFY=1` and it
   prints them instead.
 - **No config file.** whetuu has none, so there is no config parser and no
-  format for anything to smuggle through. Running, it writes three files. One is
+  format for anything to smuggle through. Running, it writes four files. One is
   the history store. The others live under `~/.cache/whetuu`, or under
   `$XDG_CACHE_HOME` when that is set: `versions` holds toolchain version strings,
-  and `release` holds the newest release tag and the time it was looked up.
-  Delete either whenever you like.
+  `release` holds the newest release tag and the time it was looked up, and
+  `scrubbed` holds the version that last scrubbed the history store. Delete any
+  of them whenever you like.
 - **Three subprocesses, and nothing else.** `git --no-optional-locks status
   --porcelain=2 --branch -z`, and the version command of the detected toolchain
   (`zig version`, `node --version`, …), both bounded and neither run outside a
@@ -182,11 +183,56 @@ whetuu reads your repository and prints a line. Here is what that involves.
   So the bash integration adds `ignorespace` to your `HISTCONTROL` and keeps any
   value you already had. The command then stays out of bash's history too.
 
-- **Anything else is stored in plaintext.** Paste a token into a `curl` without
-  that leading space and the whole line is written to the store, as long as the
-  command succeeds. File permissions are the only protection. Nothing is
-  redacted. Keep secrets in environment variables or a credentials file, as you
-  would with your shell's own history.
+- **A command holding a credential is not stored.** whetuu drops the whole
+  line when it finds one of these in it:
+
+  | Shape | Examples |
+  |---|---|
+  | A provider token, recognized by its prefix | AWS (`AKIA`, `ASIA`), GitHub (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), GitLab (`glpat-`), Slack (`xox…-` and webhook URLs), Stripe, Netlify, npm, Pulumi, Anthropic, OpenAI, Google API keys, Hugging Face, DigitalOcean, PyPI |
+  | A password in a URL | `https://me:hunter2@example.com`, `postgres://app:pw@db/app` |
+  | An `Authorization` header with a literal value | `-H 'Authorization: Bearer abc123…'` |
+  | A JWT or a private key | `eyJ….eyJ….…`, `-----BEGIN … PRIVATE KEY-----` |
+  | A literal value assigned to a secret name | `export GITHUB_TOKEN=abc`, `DB_PASSWORD=x make` |
+  | A literal value passed to a secret flag | `--password x`, `--token=x`, `--api-key x`, `--secret x` |
+
+  A secret name is an uppercase variable with `PASSWORD`, `PASSWD`, `SECRET`,
+  `TOKEN` or `API_KEY` as one of its parts, plus `AWS_SECRET_ACCESS_KEY`,
+  `GOOGLE_SERVICE_ACCOUNT_KEY` and `AZURE_…_KEY`. A name ending in `_FILE`,
+  `_PATH` or `_DIR` holds where a secret lives, so it is left alone. A value
+  that the shell expands is not a secret on the command line, so
+  `TOKEN=$(gh auth token)`, `--token "$T"` and `Bearer $TOKEN` are all stored.
+
+  Every shape is anchored on a prefix or on where the secret sits. whetuu does
+  not guess from how random a string looks, so a command it drops is one you
+  could have predicted.
+
+- **Anything else is stored in plaintext.** A secret in a shape that list does
+  not know is written to the store, as long as the command succeeds. File
+  permissions are the only protection, and your shell's own history keeps the
+  same line anyway. Keep secrets in environment variables or a credentials
+  file, and use the leading space when you cannot.
+
+- **What was stored before a pattern existed is removed later.** The first time
+  a new version of whetuu records a command, it reads the whole store once and
+  removes every command the list above matches. That is how a store recorded
+  under older patterns catches up with a release that adds one. It runs when a
+  command is recorded, never while the status line draws. The version that did
+  it is written to `scrubbed`, so it happens once per version.
+
+  This deletes commands without asking. The patterns are strict so that what
+  goes is what the list above says. A command it removes is gone for good.
+
+  For a secret the list cannot know, like a password or an internal host name,
+  remove it yourself. Start the line with a space, so neither whetuu nor your
+  shell keeps the secret you are removing:
+
+  ```sh
+   whetuu scrub --dry-run hunter2
+   whetuu scrub hunter2
+  ```
+
+  whetuu never records a `whetuu scrub` line, with or without the space. Your
+  shell does, unless the space is there.
 
   Only commands that exited `0` are stored. Treat that as noise reduction for
   the picker, not a safeguard. It filters out your typos, not your working
@@ -301,7 +347,7 @@ rm -rf ~/.local/share/whetuu ~/.cache/whetuu
 Then delete the `# whetuu` block from your shell config. The first line removes
 the program. The second removes the history store and both caches, which live
 under the XDG directories rather than next to the binary. Run
-`whetuu paths` before you delete anything and it prints all three locations, in
+`whetuu paths` before you delete anything and it prints all four locations, in
 case `$XDG_DATA_HOME` or `$XDG_CACHE_HOME` moves them on your machine.
 
 ### From source
@@ -373,6 +419,8 @@ history picker is on the up arrow. The full command surface:
 | `whetuu render` | Render one status line. Called by the shell hook, not by you |
 | `whetuu history` | Open the interactive history picker |
 | `whetuu history add -- <command>` | Record a finished command. Called by the shell hook |
+| `whetuu scrub [<text>]` | Remove every stored command the secret patterns match, and every one containing the text. Prints how many went |
+| `whetuu scrub --dry-run [<text>]` | List what `scrub` would remove, and change nothing |
 | `whetuu paths` | Print where the history store and version cache live, and whether each file exists yet |
 | `whetuu upgrade` | Replace the running binary with the newest release, and print what changed |
 | `whetuu upgrade --check` | Say what release is waiting and what changed in it, and install nothing. Writes the tag down, which is what the status line reads. whetuu runs this for itself once a day |
@@ -382,7 +430,8 @@ exit status, duration and width. That is why they are left out here.
 
 `whetuu paths` marks a file that is not there yet rather than hiding it. A fresh
 install has none of them until the first command is recorded, the first toolchain
-version is cached, and the first release check runs. With neither `$HOME` nor the matching XDG variable set it says
+version is cached, and the first release check runs.
+The first recorded command also writes `scrubbed`. With neither `$HOME` nor the matching XDG variable set it says
 so, because then whetuu has nowhere to write.
 
 ## History
@@ -392,7 +441,9 @@ shells, at `~/.local/share/whetuu/history`. It moves under `$XDG_DATA_HOME` when
 that variable is set. macOS uses the same path rather than `~/Library`, so the
 store stays put when you share a dotfiles setup across machines.
 
-Nothing is ever deleted from it. The picker reads the most recent few megabytes
+whetuu deletes nothing from it except credentials: once per version, what the
+secret patterns match, and whatever you name with `whetuu scrub`. See
+[Security](#security). The picker reads the most recent few megabytes
 rather than the whole file, so it opens just as fast on a store built over years
 as on a fresh one. Everything you have run stays on disk either way, and on a
 store that large the commands past the window are ones you last ran years ago.
@@ -416,13 +467,18 @@ integration and tools like direnv keep working.
 
 A command is recorded once it finishes, and only when it exited with status 0.
 Typos and failed runs never enter the store. Prefix a command with a space to
-keep it out of the store entirely. Every command is stored together with the
+keep it out of the store entirely. A command your shell is told to leave out of
+its own history is left out too: `HISTIGNORE` in bash, `HISTORY_IGNORE` in zsh,
+and a `fish_should_add_to_history` function in fish. A command holding
+something shaped like a token or a password is kept out as well. See [Security](#security) for the shapes. Every command is stored together with the
 directory it ran in.
 
 The command that just broke is not lost. When a command does not exit 0, it
 appears at the top of the picker, in red. Pick it to fix and run it again.
 Cancel and it is still there the next time you open the picker. It lives in
-memory until you run another command, and never reaches the store.
+memory until you run another command, and never reaches the store. A failed
+command holding a credential is not shown there either, for the same reason the
+store refuses it.
 
 All three integrations bind the **up arrow** to the picker. Anything already
 typed on the command line carries over into the search field. The picker opens

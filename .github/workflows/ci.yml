@@ -31,6 +31,18 @@ jobs:
       # reads as a broken upgrade.
       - run: ./tools/test-release.sh
 
+  # The release ships for macOS too, and the history store leans on what
+  # differs there: file locks, inode numbers and the atomic rename.
+  test-macos:
+    name: Test on macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build test
+
   lint:
     name: Lint the tools and the shell integration
     runs-on: ubuntu-latest
@@ -47,8 +59,8 @@ jobs:
       # shellcheck reads sh and bash. zsh and fish are parsed by their own
       # shells instead, which is all either one offers.
       - run: shellcheck tools/*.sh docs/install.sh assets/init.bash
-      - run: ./tools/test-init.sh
       - run: sudo apt-get update && sudo apt-get install -y zsh fish
+      - run: ./tools/test-init.sh
       - name: Parse every shell integration
         run: |
           bash -n assets/init.bash

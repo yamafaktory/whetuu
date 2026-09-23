@@ -51,6 +51,84 @@ check "an unset PROMPT_COMMAND just gets whetuu" \
     "__whetuu_precmd" \
     "$(hooks 'unset PROMPT_COMMAND; source "$1"')"
 
+# A stand in for whetuu that logs every recorded command, so the fish and zsh
+# checks below can see what reached the store without a real one.
+fake=$(mktemp -d)
+trap 'rm -rf "$fake"' EXIT
+cat >"$fake/whetuu" <<'SH'
+#!/bin/sh
+[ "$1" = history ] && [ "$2" = add ] && shift 5 && printf '%s\n' "$*" >>"$WHETUU_TEST_LOG"
+exit 0
+SH
+chmod +x "$fake/whetuu"
+
+# Runs one command through the fish integration's postexec hook and prints
+# what was recorded, then the failed slot.
+fish_records() {
+    local log="$fake/fish.log"
+    : >"$log"
+    PATH="$fake:$PATH" WHETUU_TEST_LOG="$log" fish --no-config -c "
+        source $root/assets/init.fish
+        $1
+        $2; __whetuu_postexec '$3'
+        printf 'failed=%s' \"\$__whetuu_failed\"
+    " >"$fake/fish.out" 2>&1
+    printf '%s|%s' "$(cat "$log")" "$(cat "$fake/fish.out")"
+}
+
+# The same through the zsh integration's preexec and precmd hooks.
+zsh_records() {
+    local log="$fake/zsh.log"
+    : >"$log"
+    PATH="$fake:$PATH" WHETUU_TEST_LOG="$log" zsh -f -c "
+        source $root/assets/init.zsh
+        $1
+        __whetuu_preexec '$3'; $2; __whetuu_precmd
+        printf 'failed=%s' \"\$__whetuu_failed\"
+    " >"$fake/zsh.out" 2>&1
+    printf '%s|%s' "$(cat "$log")" "$(cat "$fake/zsh.out")"
+}
+
+if command -v fish >/dev/null; then
+    check "fish records a command" \
+        "ls|failed=" \
+        "$(fish_records '' true 'ls')"
+
+    check "fish keeps out what fish_should_add_to_history refuses" \
+        "|failed=" \
+        "$(fish_records 'function fish_should_add_to_history; not string match -q "vault*" -- $argv; end' true 'vault read x')"
+
+    check "fish clears the failed slot for a refused command" \
+        "|failed=" \
+        "$(fish_records 'function fish_should_add_to_history; not string match -q "vault*" -- $argv; end; set -g __whetuu_failed old' false 'vault read x')"
+
+    check "fish still records what fish_should_add_to_history accepts" \
+        "ls|failed=" \
+        "$(fish_records 'function fish_should_add_to_history; not string match -q "vault*" -- $argv; end' true 'ls')"
+else
+    printf 'skip fish is not installed\n'
+fi
+
+if command -v zsh >/dev/null; then
+    check "zsh records a command" \
+        "ls|failed=" \
+        "$(zsh_records '' true 'ls')"
+
+    check "zsh keeps out what HISTORY_IGNORE matches" \
+        "|failed=" \
+        "$(zsh_records 'HISTORY_IGNORE="(vault *|pass *)"' true 'vault read x')"
+
+    check "zsh clears the failed slot for an ignored command" \
+        "|failed=" \
+        "$(zsh_records 'HISTORY_IGNORE="(vault *)"; __whetuu_failed=old' false 'vault read x')"
+
+    check "zsh still records what HISTORY_IGNORE does not match" \
+        "ls|failed=" \
+        "$(zsh_records 'HISTORY_IGNORE="(vault *)"' true 'ls')"
+else
+    printf 'skip zsh is not installed\n'
+fi
+
 if [ "$failures" -ne 0 ]; then
     printf '\n%s check(s) failed\n' "$failures" >&2
     exit 1
