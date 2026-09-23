@@ -153,11 +153,12 @@ whetuu reads your repository and prints a line. Here is what that involves.
   `~/.local/bin` is not already on your `PATH`. Set `WHETUU_NO_MODIFY=1` and it
   prints them instead.
 - **No config file.** whetuu has none, so there is no config parser and no
-  format for anything to smuggle through. Running, it writes three files. One is
+  format for anything to smuggle through. Running, it writes four files. One is
   the history store. The others live under `~/.cache/whetuu`, or under
   `$XDG_CACHE_HOME` when that is set: `versions` holds toolchain version strings,
-  and `release` holds the newest release tag and the time it was looked up.
-  Delete either whenever you like.
+  `release` holds the newest release tag and the time it was looked up, and
+  `scrubbed` holds the version that last scrubbed the history store. Delete any
+  of them whenever you like.
 - **Three subprocesses, and nothing else.** `git --no-optional-locks status
   --porcelain=2 --branch -z`, and the version command of the detected toolchain
   (`zig version`, `node --version`, …), both bounded and neither run outside a
@@ -210,6 +211,28 @@ whetuu reads your repository and prints a line. Here is what that involves.
   permissions are the only protection, and your shell's own history keeps the
   same line anyway. Keep secrets in environment variables or a credentials
   file, and use the leading space when you cannot.
+
+- **What was stored before a pattern existed is removed later.** The first time
+  a new version of whetuu records a command, it reads the whole store once and
+  removes every command the list above matches. That is how a store recorded
+  under older patterns catches up with a release that adds one. It runs when a
+  command is recorded, never while the status line draws. The version that did
+  it is written to `scrubbed`, so it happens once per version.
+
+  This deletes commands without asking. The patterns are strict so that what
+  goes is what the list above says. A command it removes is gone for good.
+
+  For a secret the list cannot know, like a password or an internal host name,
+  remove it yourself. Start the line with a space, so neither whetuu nor your
+  shell keeps the secret you are removing:
+
+  ```sh
+   whetuu scrub --dry-run hunter2
+   whetuu scrub hunter2
+  ```
+
+  whetuu never records a `whetuu scrub` line, with or without the space. Your
+  shell does, unless the space is there.
 
   Only commands that exited `0` are stored. Treat that as noise reduction for
   the picker, not a safeguard. It filters out your typos, not your working
@@ -324,7 +347,7 @@ rm -rf ~/.local/share/whetuu ~/.cache/whetuu
 Then delete the `# whetuu` block from your shell config. The first line removes
 the program. The second removes the history store and both caches, which live
 under the XDG directories rather than next to the binary. Run
-`whetuu paths` before you delete anything and it prints all three locations, in
+`whetuu paths` before you delete anything and it prints all four locations, in
 case `$XDG_DATA_HOME` or `$XDG_CACHE_HOME` moves them on your machine.
 
 ### From source
@@ -396,6 +419,8 @@ history picker is on the up arrow. The full command surface:
 | `whetuu render` | Render one status line. Called by the shell hook, not by you |
 | `whetuu history` | Open the interactive history picker |
 | `whetuu history add -- <command>` | Record a finished command. Called by the shell hook |
+| `whetuu scrub [<text>]` | Remove every stored command the secret patterns match, and every one containing the text. Prints how many went |
+| `whetuu scrub --dry-run [<text>]` | List what `scrub` would remove, and change nothing |
 | `whetuu paths` | Print where the history store and version cache live, and whether each file exists yet |
 | `whetuu upgrade` | Replace the running binary with the newest release, and print what changed |
 | `whetuu upgrade --check` | Say what release is waiting and what changed in it, and install nothing. Writes the tag down, which is what the status line reads. whetuu runs this for itself once a day |
@@ -405,7 +430,8 @@ exit status, duration and width. That is why they are left out here.
 
 `whetuu paths` marks a file that is not there yet rather than hiding it. A fresh
 install has none of them until the first command is recorded, the first toolchain
-version is cached, and the first release check runs. With neither `$HOME` nor the matching XDG variable set it says
+version is cached, and the first release check runs.
+The first recorded command also writes `scrubbed`. With neither `$HOME` nor the matching XDG variable set it says
 so, because then whetuu has nowhere to write.
 
 ## History
@@ -415,7 +441,9 @@ shells, at `~/.local/share/whetuu/history`. It moves under `$XDG_DATA_HOME` when
 that variable is set. macOS uses the same path rather than `~/Library`, so the
 store stays put when you share a dotfiles setup across machines.
 
-Nothing is ever deleted from it. The picker reads the most recent few megabytes
+whetuu deletes nothing from it except credentials: once per version, what the
+secret patterns match, and whatever you name with `whetuu scrub`. See
+[Security](#security). The picker reads the most recent few megabytes
 rather than the whole file, so it opens just as fast on a store built over years
 as on a fresh one. Everything you have run stays on disk either way, and on a
 store that large the commands past the window are ones you last ran years ago.

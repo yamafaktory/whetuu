@@ -1,7 +1,8 @@
-//! whetuu entry point. Five subcommands:
+//! whetuu entry point. Six subcommands:
 //!   whetuu init <fish|bash|zsh>   — print the shell integration script
 //!   whetuu render [flags]         — render the status line (called by the shell)
 //!   whetuu history [add ...]      — open the history picker, or record a command
+//!   whetuu scrub [--dry-run] [text] — remove stored secrets from the history
 //!   whetuu paths                  — print where the history and cache live
 //!   whetuu upgrade [--check]      — replace this binary with the newest release,
 //!                                   or with --check only say what is waiting
@@ -21,8 +22,8 @@ const init_scripts = @import("init_scripts.zig");
 const picker = @import("picker.zig");
 const release = @import("release.zig");
 const render = @import("render.zig");
-const secret = @import("secret.zig");
 const style = @import("style.zig");
+const time_ago = @import("time_ago.zig");
 const upgrade = @import("upgrade.zig");
 const version_cache = @import("version_cache.zig");
 
@@ -66,6 +67,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     if (std.mem.eql(u8, sub, "history")) {
         return runHistory(io, arena, init.environ, args[2..]);
+    }
+
+    if (std.mem.eql(u8, sub, "scrub")) {
+        return runScrub(io, arena, init.environ, args[2..]);
     }
 
     if (std.mem.eql(u8, sub, "paths")) {
@@ -112,7 +117,7 @@ fn unknownSubcommand(io: Io, arena: Allocator, sub: []const u8) !void {
     std.process.exit(2);
 }
 
-/// Prints where whetuu keeps its three files, and whether each exists yet.
+/// Prints where whetuu keeps its four files, and whether each exists yet.
 /// Both follow the XDG base directory spec, so neither is under the directory
 /// the installer put the binary in: removing whetuu should not remove the
 /// history you built up with it.
@@ -123,17 +128,20 @@ fn runPaths(io: Io, arena: Allocator, environ: Environ) !void {
     const cache = try version_cache.path(arena, xdg_cache, home);
     var release_buf: [release.path_buf_len]u8 = undefined;
     const releases = release.cachePath(&release_buf, xdg_cache, home);
+    var scrubbed_buf: [release.path_buf_len]u8 = undefined;
+    const scrubbed = release.cacheFile(&scrubbed_buf, xdg_cache, home, scrubbed_name);
 
     var buf: [1024]u8 = undefined;
     var fw = Io.File.stdout().writer(io, &buf);
     const w = &fw.interface;
 
     try w.writeAll(style.sgr.fg_purple ++ style.icon.star ++ style.sgr.reset ++ " " ++
-        style.sgr.dim ++ "whetuu keeps three files, all outside the install directory" ++
+        style.sgr.dim ++ "whetuu keeps four files, all outside the install directory" ++
         style.sgr.reset ++ "\n\n");
     try writePath(io, w, "history", store);
     try writePath(io, w, "cache", cache);
     try writePath(io, w, "release", releases);
+    try writePath(io, w, "scrubbed", scrubbed);
     try w.flush();
 }
 
@@ -143,7 +151,7 @@ fn writePath(io: Io, w: *std.Io.Writer, label: []const u8, path: ?[]const u8) !v
     const dim = style.sgr.dim;
     const reset = style.sgr.reset;
 
-    try w.print("  " ++ dim ++ "{s: <8}" ++ reset, .{label});
+    try w.print("  " ++ dim ++ "{s: <10}" ++ reset, .{label});
     const p = path orelse {
         try w.writeAll(dim ++ "unset, no HOME or XDG variable" ++ reset ++ "\n");
         return;
@@ -204,6 +212,7 @@ fn runHistory(io: Io, arena: Allocator, environ: Environ, args: []const [:0]cons
     const cwd = cwd_buf[0..cwd_len];
 
     if (args.len > 0 and std.mem.eql(u8, args[0], "add")) {
+        scrubOncePerVersion(io, arena, environ, path);
         const opts = try cli.parseHistoryAdd(args[1..]);
         if (opts.exit_status != 0) return;
 
@@ -232,6 +241,109 @@ fn runHistory(io: Io, arena: Allocator, environ: Environ, args: []const [:0]cons
     if (chosen.action == .edit) std.process.exit(picker.edit_exit_code);
 }
 
+/// Name of the cache file holding the version that last scrubbed the store.
+const scrubbed_name = "scrubbed";
+
+/// Scrubs the store the first time a version of whetuu records a command, so
+/// patterns a release adds reach what older ones let through. The version that
+/// did it is written down, so every later command costs one small read. A scrub
+/// that fails leaves no mark and is tried again with the next command. Runs
+/// from `history add` and never from `render`, so the status line never waits
+/// on it.
+fn scrubOncePerVersion(io: Io, arena: Allocator, environ: Environ, store: []const u8) void {
+    var path_buf: [release.path_buf_len]u8 = undefined;
+    const marker = release.cacheFile(&path_buf, envOrEmpty(environ, "XDG_CACHE_HOME"), envOrEmpty(environ, "HOME"), scrubbed_name) orelse return;
+    scrubOnce(io, arena, store, marker, build_options.version);
+}
+
+fn scrubOnce(io: Io, arena: Allocator, store: []const u8, marker: []const u8, version: []const u8) void {
+    var line_buf: [release.line_buf_len]u8 = undefined;
+    if (release.readCache(io, marker, &line_buf)) |seen| {
+        if (std.mem.eql(u8, seen.tag, version)) return;
+    }
+
+    _ = history.scrub(io, arena, store, "", false) catch return;
+    _ = release.writeCache(io, marker, version, unixNow(io));
+}
+
+test "the store is scrubbed once for each version that records into it" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const store = try std.fs.path.join(a, &.{ dir, "history" });
+    const marker = try std.fs.path.join(a, &.{ dir, "cache", scrubbed_name });
+    const leaked = "10\t/w\tgit clone https://me:hunter2@example.com/r.git\n";
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "history", .data = leaked });
+    scrubOnce(io, a, store, marker, "v0.1.17");
+    try std.testing.expectEqualStrings("", try tmp.dir.readFileAlloc(io, "history", a, .unlimited));
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "history", .data = leaked });
+    scrubOnce(io, a, store, marker, "v0.1.17");
+    try std.testing.expectEqualStrings(leaked, try tmp.dir.readFileAlloc(io, "history", a, .unlimited));
+
+    scrubOnce(io, a, store, marker, "v0.1.18");
+    try std.testing.expectEqualStrings("", try tmp.dir.readFileAlloc(io, "history", a, .unlimited));
+}
+
+/// Handles `whetuu scrub [--dry-run] [--] [<text>]`: removes every stored
+/// command the built in patterns match, and every one containing `text`. With
+/// `--dry-run` it lists them and changes nothing.
+fn runScrub(io: Io, arena: Allocator, environ: Environ, args: []const [:0]const u8) !void {
+    const opts = cli.parseScrub(args) catch {
+        release.note(io, "scrub takes {s}--dry-run{s}, then the text to remove. Put {s}--{s} before text that starts with a dash.", .{
+            style.sgr.bold, style.sgr.reset, style.sgr.bold, style.sgr.reset,
+        });
+        std.process.exit(2);
+    };
+    const store = (try history.storePath(arena, envOrEmpty(environ, "XDG_DATA_HOME"), envOrEmpty(environ, "HOME"))) orelse return;
+
+    const parts = try arena.alloc([]const u8, opts.words.len);
+    for (opts.words, parts) |word, *part| part.* = word;
+    const text = try std.mem.join(arena, " ", parts);
+
+    const got = try history.scrub(io, arena, store, text, opts.dry_run);
+
+    var buf: [4096]u8 = undefined;
+    var fw = Io.File.stdout().writer(io, &buf);
+    const w = &fw.interface;
+    const dim = style.sgr.dim;
+    const reset = style.sgr.reset;
+    const star = style.sgr.fg_purple ++ style.icon.star ++ reset;
+
+    if (opts.dry_run) {
+        const now = unixNow(io);
+        for (got.removed) |entry| {
+            var ago_buf: [24]u8 = undefined;
+            const ago = time_ago.relative(&ago_buf, now, entry.timestamp);
+            try w.print("  " ++ dim ++ "{s: >4}" ++ reset ++ "  {s}\n", .{ ago, try style.sanitize(arena, entry.command) });
+        }
+        if (got.removed.len > 0) try w.writeByte('\n');
+        try w.print(star ++ " {d} of {d} {s} would be removed. Nothing was changed.\n", .{ got.removed.len, got.total, commands(got.total) });
+        return w.flush();
+    }
+
+    if (got.removed.len == 0) {
+        try w.print(star ++ " Nothing to remove in {d} {s}.\n", .{ got.total, commands(got.total) });
+        return w.flush();
+    }
+
+    try w.print(star ++ " Removed {d} of {d} {s}.\n", .{ got.removed.len, got.total, commands(got.total) });
+    try w.writeAll(dim ++ "  Your shell's own history may still hold them. Rotate any token that leaked." ++ reset ++ "\n");
+    try w.flush();
+}
+
+fn commands(n: usize) []const u8 {
+    return if (n == 1) "command" else "commands";
+}
+
 /// Prepends the just-failed command as an ephemeral, most-recent entry the
 /// picker marks and never stores, so the command that just broke can be picked
 /// and edited without cluttering the store. A stored duplicate in the same
@@ -241,7 +353,7 @@ fn runHistory(io: Io, arena: Allocator, environ: Environ, args: []const [:0]cons
 /// would have refused had the command succeeded.
 fn withLastFailure(arena: Allocator, loaded: []const history.Entry, last: []const u8, cwd: []const u8, failed_at: i64) ![]const history.Entry {
     const command = std.mem.trim(u8, last, " \t\r\n");
-    if (command.len == 0 or secret.contains(command)) return loaded;
+    if (command.len == 0 or history.refuses(command)) return loaded;
 
     var out: std.ArrayList(history.Entry) = .empty;
     try out.ensureTotalCapacity(arena, loaded.len + 1);
@@ -278,6 +390,8 @@ fn usage(io: Io) !void {
         "  " ++ purple ++ "render" ++ reset ++ "                 " ++ dim ++ "Render the status line (called by the shell)" ++ reset ++ "\n" ++
         "  " ++ purple ++ "history" ++ reset ++ "                " ++ dim ++ "Open the interactive history picker" ++ reset ++ "\n" ++
         "  " ++ purple ++ "history add" ++ reset ++ "            " ++ dim ++ "Record a finished command (status 0 only)" ++ reset ++ "\n" ++
+        "  " ++ purple ++ "scrub" ++ reset ++ " [text]           " ++ dim ++ "Remove stored secrets, and commands containing text" ++ reset ++ "\n" ++
+        "  " ++ purple ++ "scrub --dry-run" ++ reset ++ "        " ++ dim ++ "List what scrub would remove, and change nothing" ++ reset ++ "\n" ++
         "  " ++ purple ++ "paths" ++ reset ++ "                  " ++ dim ++ "Print where the history and cache live" ++ reset ++ "\n" ++
         "  " ++ purple ++ "upgrade" ++ reset ++ "                " ++ dim ++ "Replace this binary with the newest release" ++ reset ++ "\n" ++
         "  " ++ purple ++ "upgrade --check" ++ reset ++ "        " ++ dim ++ "Say what release is waiting, and install nothing" ++ reset ++ "\n" ++
@@ -338,6 +452,9 @@ test "paths reports every file, and says so when there is nowhere to write" {
     try std.testing.expectEqualStrings("/h/.local/share/whetuu/history", (try history.storePath(a, "", "/h")).?);
     try std.testing.expectEqualStrings("/h/.cache/whetuu/versions", (try version_cache.path(a, "", "/h")).?);
     try std.testing.expectEqualStrings("/h/.cache/whetuu/release", release.cachePath(&release_buf, "", "/h").?);
+    var scrubbed_buf: [release.path_buf_len]u8 = undefined;
+    try std.testing.expectEqualStrings("/xc/whetuu/scrubbed", release.cacheFile(&scrubbed_buf, "/xc", "/h", scrubbed_name).?);
+    try std.testing.expectEqualStrings("/h/.cache/whetuu/scrubbed", release.cacheFile(&scrubbed_buf, "", "/h", scrubbed_name).?);
 
     // whetuu creates no directory of its own in $HOME, so removing the binary
     // from ~/.local/bin cannot take the history with it, and an uninstall has
@@ -346,6 +463,7 @@ test "paths reports every file, and says so when there is nowhere to write" {
         (try history.storePath(a, "", "/h")).?,
         (try version_cache.path(a, "", "/h")).?,
         release.cachePath(&release_buf, "", "/h").?,
+        release.cacheFile(&scrubbed_buf, "", "/h", scrubbed_name).?,
     }) |path| {
         try std.testing.expect(std.mem.startsWith(u8, path, "/h/.local/share/") or
             std.mem.startsWith(u8, path, "/h/.cache/"));
@@ -354,6 +472,7 @@ test "paths reports every file, and says so when there is nowhere to write" {
     try std.testing.expect((try history.storePath(a, "", "")) == null);
     try std.testing.expect((try version_cache.path(a, "", "")) == null);
     try std.testing.expect(release.cachePath(&release_buf, "", "") == null);
+    try std.testing.expect(release.cacheFile(&scrubbed_buf, "", "", scrubbed_name) == null);
 }
 
 test "withLastFailure prepends the failure once, marked, dropping a same-dir duplicate" {

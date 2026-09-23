@@ -23,6 +23,14 @@ pub const HistoryPickArgs = struct {
     last_at: i64 = 0,
 };
 
+/// Values parsed from `whetuu scrub`: whether to only report, and the text a
+/// stored command must contain to be removed, empty for the built in patterns
+/// alone.
+pub const ScrubArgs = struct {
+    dry_run: bool = false,
+    words: []const [:0]const u8 = &.{},
+};
+
 /// Values parsed from `whetuu upgrade` flags. `--check` looks the newest
 /// release up and prints what it would install, without installing it.
 pub const UpgradeArgs = struct {
@@ -121,6 +129,30 @@ pub fn parseUpgrade(args: []const [:0]const u8) ParseError!UpgradeArgs {
     return result;
 }
 
+/// Parses `[--dry-run] [--] [<text>...]` for `scrub`. A flag it does not know
+/// is rejected rather than taken as text, since text decides what gets deleted.
+/// Text that starts with `--` goes after a `--`.
+pub fn parseScrub(args: []const [:0]const u8) ParseError!ScrubArgs {
+    var result: ScrubArgs = .{};
+
+    for (args, 0..) |arg, i| {
+        if (std.mem.eql(u8, arg, "--")) {
+            result.words = args[i + 1 ..];
+            return result;
+        }
+        if (std.mem.eql(u8, arg, "--dry-run")) {
+            result.dry_run = true;
+            continue;
+        }
+        if (std.mem.startsWith(u8, arg, "-")) return error.UnknownFlag;
+
+        result.words = args[i..];
+        return result;
+    }
+
+    return result;
+}
+
 /// Parses `--shell`, `--status`, `--duration-ms`, and `--width` from `args`
 /// (which must exclude argv[0] and the subcommand). Unknown numeric values that
 /// overflow are clamped rather than rejected, since a shell can legitimately
@@ -202,6 +234,26 @@ test "upgrade takes --check, and nothing else" {
 
     const value = [_][:0]const u8{ "--check", "v0.1.15" };
     try std.testing.expectError(error.UnknownFlag, parseUpgrade(&value));
+}
+
+test "scrub reads --dry-run, then text, and refuses a flag it does not know" {
+    const none = try parseScrub(&.{});
+    try std.testing.expect(!none.dry_run);
+    try std.testing.expectEqual(@as(usize, 0), none.words.len);
+
+    const dry = try parseScrub(&.{ "--dry-run", "hunter2" });
+    try std.testing.expect(dry.dry_run);
+    try std.testing.expectEqualStrings("hunter2", dry.words[0]);
+
+    const after = try parseScrub(&.{ "hunter2", "--dry-run" });
+    try std.testing.expect(!after.dry_run);
+    try std.testing.expectEqual(@as(usize, 2), after.words.len);
+
+    const dashed = try parseScrub(&.{ "--", "--password" });
+    try std.testing.expectEqualStrings("--password", dashed.words[0]);
+
+    try std.testing.expectError(error.UnknownFlag, parseScrub(&.{"--dryrun"}));
+    try std.testing.expectError(error.UnknownFlag, parseScrub(&.{"-n"}));
 }
 
 test "history add parses status then command words after --" {
