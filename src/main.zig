@@ -314,6 +314,7 @@ test {
     _ = @import("release.zig");
     _ = @import("render.zig");
     _ = @import("search.zig");
+    _ = @import("secret.zig");
     _ = @import("style.zig");
     _ = @import("time_ago.zig");
     _ = @import("upgrade.zig");

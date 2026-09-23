@@ -19,6 +19,8 @@ const Allocator = std.mem.Allocator;
 const Dir = std.Io.Dir;
 const Io = std.Io;
 
+const secret = @import("secret.zig");
+
 /// How much of the store a load reads, taken from the end. This bounds what an
 /// open costs without bounding what the store keeps: a larger file still holds
 /// every line, and only the oldest stop being offered to the picker. At a
@@ -53,7 +55,11 @@ pub const Entry = struct {
 ///
 /// A command that starts with a space or tab is not recorded at all — the
 /// long-standing shell convention for "keep this one out of history", and the
-/// only way to keep a secret typed on the command line out of the store.
+/// surest way to keep a secret typed on the command line out of the store.
+///
+/// A command that holds something shaped like a credential is not recorded
+/// either: a provider token, a password in a URL or a flag, a literal value
+/// assigned to a variable named like a secret. See `secret.zig` for the shapes.
 ///
 /// Neither is a command that is not valid UTF-8. Binary reaches a command line
 /// more easily than it sounds — paste an image into the terminal and the shell
@@ -67,6 +73,7 @@ pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd:
     const trimmed = std.mem.trim(u8, command, " \t\r\n");
     if (trimmed.len == 0) return;
     if (!std.unicode.utf8ValidateSlice(trimmed)) return;
+    if (secret.contains(trimmed)) return;
 
     if (std.fs.path.dirname(path)) |dir| {
         Dir.cwd().createDirPath(io, dir) catch |err| switch (err) {
@@ -195,6 +202,28 @@ test "a command that is not text never reaches the store" {
     try std.testing.expectEqual(@as(usize, 2), stored.len);
     try std.testing.expectEqualStrings("for f in *.zig\ndo\n\techo $f\ndone", stored[0].command);
     try std.testing.expectEqualStrings("git commit -m 'plan — done'", stored[1].command);
+}
+
+test "a command holding a credential never reaches the store" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try std.fs.path.join(a, &.{ dir, "history" });
+
+    try add(io, a, path, "git clone https://me:hunter2@example.com/r.git", "/w", 30);
+    try add(io, a, path, "curl -H 'Authorization: Bearer abcdefgh123' https://api", "/w", 31);
+    try add(io, a, path, "export GITHUB_TOKEN=$(gh auth token)", "/w", 32);
+
+    const stored = try load(io, a, path);
+    try std.testing.expectEqual(@as(usize, 1), stored.len);
+    try std.testing.expectEqualStrings("export GITHUB_TOKEN=$(gh auth token)", stored[0].command);
 }
 
 /// Remembers which (directory, command) pairs a load has already offered and

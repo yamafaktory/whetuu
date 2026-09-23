@@ -182,11 +182,34 @@ whetuu reads your repository and prints a line. Here is what that involves.
   So the bash integration adds `ignorespace` to your `HISTCONTROL` and keeps any
   value you already had. The command then stays out of bash's history too.
 
-- **Anything else is stored in plaintext.** Paste a token into a `curl` without
-  that leading space and the whole line is written to the store, as long as the
-  command succeeds. File permissions are the only protection. Nothing is
-  redacted. Keep secrets in environment variables or a credentials file, as you
-  would with your shell's own history.
+- **A command holding a credential is not stored.** whetuu drops the whole
+  line when it finds one of these in it:
+
+  | Shape | Examples |
+  |---|---|
+  | A provider token, recognized by its prefix | AWS (`AKIA`, `ASIA`), GitHub (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), GitLab (`glpat-`), Slack (`xox…-` and webhook URLs), Stripe, Netlify, npm, Pulumi, Anthropic, OpenAI, Google API keys, Hugging Face, DigitalOcean, PyPI |
+  | A password in a URL | `https://me:hunter2@example.com`, `postgres://app:pw@db/app` |
+  | An `Authorization` header with a literal value | `-H 'Authorization: Bearer abc123…'` |
+  | A JWT or a private key | `eyJ….eyJ….…`, `-----BEGIN … PRIVATE KEY-----` |
+  | A literal value assigned to a secret name | `export GITHUB_TOKEN=abc`, `DB_PASSWORD=x make` |
+  | A literal value passed to a secret flag | `--password x`, `--token=x`, `--api-key x`, `--secret x` |
+
+  A secret name is an uppercase variable with `PASSWORD`, `PASSWD`, `SECRET`,
+  `TOKEN` or `API_KEY` as one of its parts, plus `AWS_SECRET_ACCESS_KEY`,
+  `GOOGLE_SERVICE_ACCOUNT_KEY` and `AZURE_…_KEY`. A name ending in `_FILE`,
+  `_PATH` or `_DIR` holds where a secret lives, so it is left alone. A value
+  that the shell expands is not a secret on the command line, so
+  `TOKEN=$(gh auth token)`, `--token "$T"` and `Bearer $TOKEN` are all stored.
+
+  Every shape is anchored on a prefix or on where the secret sits. whetuu does
+  not guess from how random a string looks, so a command it drops is one you
+  could have predicted.
+
+- **Anything else is stored in plaintext.** A secret in a shape that list does
+  not know is written to the store, as long as the command succeeds. File
+  permissions are the only protection, and your shell's own history keeps the
+  same line anyway. Keep secrets in environment variables or a credentials
+  file, and use the leading space when you cannot.
 
   Only commands that exited `0` are stored. Treat that as noise reduction for
   the picker, not a safeguard. It filters out your typos, not your working
@@ -416,7 +439,8 @@ integration and tools like direnv keep working.
 
 A command is recorded once it finishes, and only when it exited with status 0.
 Typos and failed runs never enter the store. Prefix a command with a space to
-keep it out of the store entirely. Every command is stored together with the
+keep it out of the store entirely. A command holding something shaped like a
+token or a password is kept out too. See [Security](#security) for the shapes. Every command is stored together with the
 directory it ran in.
 
 The command that just broke is not lost. When a command does not exit 0, it
