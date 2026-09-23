@@ -88,7 +88,7 @@ pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd:
     else
         try std.fmt.allocPrint(arena, "{d}\t{s}\n", .{ now, cmd });
 
-    var file = try Dir.createFileAbsolute(io, path, .{ .truncate = false, .lock = .exclusive, .permissions = .fromMode(0o600) });
+    var file = try openLocked(io, path);
     defer file.close(io);
 
     // Command lines routinely hold paths and secrets, so the store must stay
@@ -101,6 +101,60 @@ pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd:
     writer.pos = try file.length(io);
     try writer.interface.writeAll(line);
     try writer.interface.flush();
+}
+
+/// Opens the store for appending under an exclusive lock. Rewriting the store
+/// renames a new file over the path while holding the same lock, so a writer
+/// that opened the old file before the rename and then waited on its lock would
+/// append to a file nobody reads again. Reopening until the locked file is the
+/// one at the path closes that gap. The retries are bounded because some file
+/// systems do not keep inode numbers stable, and there a write that may be lost
+/// is better than one that never finishes.
+fn openLocked(io: Io, path: []const u8) !Io.File {
+    for (0..3) |_| {
+        const file = try Dir.createFileAbsolute(io, path, .{ .truncate = false, .lock = .exclusive, .permissions = .fromMode(0o600) });
+        if (isAt(io, file, path)) return file;
+        file.close(io);
+    }
+    return Dir.createFileAbsolute(io, path, .{ .truncate = false, .lock = .exclusive, .permissions = .fromMode(0o600) });
+}
+
+/// True when `file` is still the file at `path`. A file that cannot be
+/// inspected counts as current, so the check never blocks a write.
+fn isAt(io: Io, file: Io.File, path: []const u8) bool {
+    const open = file.stat(io) catch return true;
+    const at = Dir.cwd().statFile(io, path, .{}) catch return false;
+    return open.inode == at.inode;
+}
+
+test "a store replaced after it was opened is no longer the one at its path" {
+    const io = std.testing.io;
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try std.fs.path.join(a, &.{ dir, "history" });
+    const replacement = try std.fs.path.join(a, &.{ dir, "history.new" });
+
+    try add(io, a, path, "ls", "/w", 10);
+    const stale = try Dir.openFileAbsolute(io, path, .{});
+    defer stale.close(io);
+    try std.testing.expect(isAt(io, stale, path));
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "history.new", .data = "20\t/w\tpwd\n" });
+    try Dir.renameAbsolute(replacement, path, io);
+    try std.testing.expect(!isAt(io, stale, path));
+
+    try add(io, a, path, "git status", "/w", 30);
+    const stored = try load(io, a, path);
+    try std.testing.expectEqual(@as(usize, 2), stored.len);
+    try std.testing.expectEqualStrings("git status", stored[0].command);
+    try std.testing.expectEqualStrings("pwd", stored[1].command);
 }
 
 /// Reads the history file and returns its unique entries, newest first. A
