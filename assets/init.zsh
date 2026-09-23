@@ -8,10 +8,17 @@ __whetuu_failed=""
 __whetuu_failed_at=""
 
 # zsh hands preexec the full command line, so it is stashed here and recorded
-# in precmd once the exit status is known.
+# in precmd once the exit status is known. A command matching HISTORY_IGNORE is
+# one zsh keeps out of its history file, so whetuu keeps it out of the store and
+# the failed slot too.
 __whetuu_preexec() {
     __whetuu_cmd=$1
     __whetuu_start=$EPOCHREALTIME
+    if (( ${+HISTORY_IGNORE} )) && [[ $1 == ${~HISTORY_IGNORE} ]]; then
+        __whetuu_cmd=""
+        __whetuu_failed=""
+        __whetuu_failed_at=""
+    fi
 }
 
 __whetuu_precmd() {

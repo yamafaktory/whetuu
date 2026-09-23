@@ -439,8 +439,10 @@ integration and tools like direnv keep working.
 
 A command is recorded once it finishes, and only when it exited with status 0.
 Typos and failed runs never enter the store. Prefix a command with a space to
-keep it out of the store entirely. A command holding something shaped like a
-token or a password is kept out too. See [Security](#security) for the shapes. Every command is stored together with the
+keep it out of the store entirely. A command your shell is told to leave out of
+its own history is left out too: `HISTIGNORE` in bash, `HISTORY_IGNORE` in zsh,
+and a `fish_should_add_to_history` function in fish. A command holding
+something shaped like a token or a password is kept out as well. See [Security](#security) for the shapes. Every command is stored together with the
 directory it ran in.
 
 The command that just broke is not lost. When a command does not exit 0, it
