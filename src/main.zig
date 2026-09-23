@@ -21,6 +21,7 @@ const init_scripts = @import("init_scripts.zig");
 const picker = @import("picker.zig");
 const release = @import("release.zig");
 const render = @import("render.zig");
+const secret = @import("secret.zig");
 const style = @import("style.zig");
 const upgrade = @import("upgrade.zig");
 const version_cache = @import("version_cache.zig");
@@ -236,10 +237,11 @@ fn runHistory(io: Io, arena: Allocator, environ: Environ, args: []const [:0]cons
 /// and edited without cluttering the store. A stored duplicate in the same
 /// directory is dropped so the command appears once, marked. An empty or
 /// whitespace-only `last` — no failure, or the shell's slot was clear — returns
-/// `loaded` untouched.
+/// `loaded` untouched, and so does one holding a credential, which the store
+/// would have refused had the command succeeded.
 fn withLastFailure(arena: Allocator, loaded: []const history.Entry, last: []const u8, cwd: []const u8, failed_at: i64) ![]const history.Entry {
     const command = std.mem.trim(u8, last, " \t\r\n");
-    if (command.len == 0) return loaded;
+    if (command.len == 0 or secret.contains(command)) return loaded;
 
     var out: std.ArrayList(history.Entry) = .empty;
     try out.ensureTotalCapacity(arena, loaded.len + 1);
@@ -381,4 +383,19 @@ test "withLastFailure prepends the failure once, marked, dropping a same-dir dup
     // No failure (empty or blank slot) leaves the loaded list untouched.
     try std.testing.expectEqual(@as(usize, 2), (try withLastFailure(a, &loaded, "", "/w", 30)).len);
     try std.testing.expectEqual(@as(usize, 2), (try withLastFailure(a, &loaded, "   ", "/w", 30)).len);
+}
+
+test "withLastFailure leaves out a failure holding a credential" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const loaded = [_]history.Entry{
+        .{ .command = "ls", .cwd = "/w", .timestamp = 10 },
+    };
+
+    const with = try withLastFailure(a, &loaded, "git clone https://me:hunter2@example.com/r.git", "/w", 30);
+    try std.testing.expectEqual(@as(usize, 1), with.len);
+    try std.testing.expectEqualStrings("ls", with[0].command);
+    try std.testing.expect(!with[0].failed);
 }
