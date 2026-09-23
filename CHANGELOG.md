@@ -3,6 +3,20 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.17 — 2026-09-23
+
+### Changed
+
+- Keep commands holding a token or a password out of the history store
+- Leave a failed command holding a credential off the top of the picker
+- Leave out of the store what fish and zsh are told to leave out of their own history
+- Reopen the history store when it was replaced while a command waited to be recorded
+- Run the tests on macOS too
+
+### Removed
+
+- Remove stored secrets once per version, and add whetuu scrub for the ones no pattern knows
+
 ## v0.1.16 — 2026-09-09
 
 ### Changed
