@@ -3,6 +3,12 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.18 — 2026-10-19
+
+### Changed
+
+- Build with Zig 0.18
+
 ## v0.1.17 — 2026-09-23
 
 ### Changed
