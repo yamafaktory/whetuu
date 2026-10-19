@@ -42,7 +42,7 @@ pub fn resolve(io: Io, arena: Allocator, path_env: []const u8, exe: []const u8) 
     var it = std.mem.splitScalar(u8, path_env, ':');
     while (it.next()) |dir| {
         if (dir.len == 0) continue;
-        const candidate = std.fs.path.join(arena, &.{ dir, exe }) catch return null;
+        const candidate = Io.Dir.path.join(arena, &.{ dir, exe }) catch return null;
         if (stat(io, candidate)) |key| return key;
     }
 
@@ -91,7 +91,7 @@ pub fn put(
 ) void {
     if (std.mem.indexOfAny(u8, version, "\t\n") != null) return;
 
-    const dir = std.fs.path.dirname(cache_path) orelse return;
+    const dir = Io.Dir.path.dirname(cache_path) orelse return;
     Dir.cwd().createDirPath(io, dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return,
@@ -205,7 +205,7 @@ test "put replaces one entry and leaves no staging file behind" {
     defer tmp_dir.cleanup();
 
     const dir_path = try tmp_dir.dir.realPathFileAlloc(io, ".", a);
-    const cache_path = try std.fs.path.join(a, &.{ dir_path, "versions" });
+    const cache_path = try Io.Dir.path.join(a, &.{ dir_path, "versions" });
     const zig: Key = .{ .path = "/usr/bin/zig", .mtime = 1, .size = 2 };
     const go: Key = .{ .path = "/usr/bin/go", .mtime = 3, .size = 4 };
 

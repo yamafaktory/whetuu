@@ -63,7 +63,7 @@ Left to right, each shown only when relevant:
 
 A status line runs before every command, so you pay its cost constantly.
 Numbers from `hyperfine --warmup 40 --runs 400` on a 13th gen i9-13900H,
-ReleaseFast build, with the toolchain version cache warm, pinned to the
+`--release=fast` build, with the toolchain version cache warm, pinned to the
 performance cores on an otherwise idle machine:
 
 | Directory | Render | For comparison |
@@ -352,7 +352,7 @@ case `$XDG_DATA_HOME` or `$XDG_CACHE_HOME` moves them on your machine.
 
 ### From source
 
-Needs Zig 0.17 (dev), see `minimum_zig_version` in `build.zig.zon` for the exact
+Needs Zig 0.18 (dev), see `minimum_zig_version` in `build.zig.zon` for the exact
 nightly:
 
 ```sh

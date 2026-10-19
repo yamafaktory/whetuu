@@ -73,7 +73,7 @@ pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd:
     if (!std.unicode.utf8ValidateSlice(trimmed)) return;
     if (refuses(trimmed)) return;
 
-    if (std.fs.path.dirname(path)) |dir| {
+    if (Dir.path.dirname(path)) |dir| {
         Dir.cwd().createDirPath(io, dir) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return err,
@@ -112,7 +112,7 @@ fn isScrub(command: []const u8) bool {
     var words = std.mem.tokenizeAny(u8, command, " \t\n");
     const program = words.next() orelse return false;
     const sub = words.next() orelse return false;
-    return std.mem.eql(u8, std.fs.path.basename(program), "whetuu") and std.mem.eql(u8, sub, "scrub");
+    return std.mem.eql(u8, Dir.path.basename(program), "whetuu") and std.mem.eql(u8, sub, "scrub");
 }
 
 test "a whetuu scrub line is refused, since its text is often the secret" {
@@ -184,10 +184,10 @@ fn matches(command: []const u8, text: []const u8) bool {
 }
 
 fn replaceWith(io: Io, path: []const u8, bytes: []const u8) !void {
-    var dir = try Dir.openDirAbsolute(io, std.fs.path.dirname(path) orelse return error.FileNotFound, .{});
+    var dir = try Dir.openDirAbsolute(io, Dir.path.dirname(path) orelse return error.FileNotFound, .{});
     defer dir.close(io);
 
-    var staged = try dir.createFileAtomic(io, std.fs.path.basename(path), .{
+    var staged = try dir.createFileAtomic(io, Dir.path.basename(path), .{
         .permissions = .fromMode(0o600),
         .replace = true,
     });
@@ -212,7 +212,7 @@ test "scrub removes what the patterns or the text match, and keeps the rest byte
     defer tmp.cleanup();
 
     const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
-    const path = try std.fs.path.join(a, &.{ dir, "history" });
+    const path = try Dir.path.join(a, &.{ dir, "history" });
 
     const before =
         "10\t/w\tgit status\n" ++
@@ -254,7 +254,7 @@ test "scrub on a store that does not exist yet finds nothing and creates nothing
     defer tmp.cleanup();
 
     const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
-    const path = try std.fs.path.join(a, &.{ dir, "history" });
+    const path = try Dir.path.join(a, &.{ dir, "history" });
 
     const got = try scrub(io, a, path, "", false);
     try std.testing.expectEqual(@as(usize, 0), got.total);
@@ -302,8 +302,8 @@ test "a store replaced after it was opened is no longer the one at its path" {
     defer tmp.cleanup();
 
     const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
-    const path = try std.fs.path.join(a, &.{ dir, "history" });
-    const replacement = try std.fs.path.join(a, &.{ dir, "history.new" });
+    const path = try Dir.path.join(a, &.{ dir, "history" });
+    const replacement = try Dir.path.join(a, &.{ dir, "history.new" });
 
     try add(io, a, path, "ls", "/w", 10);
     const stale = try Dir.openFileAbsolute(io, path, .{});
@@ -402,7 +402,7 @@ test "a command that is not text never reaches the store" {
     defer tmp.cleanup();
 
     const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
-    const path = try std.fs.path.join(a, &.{ dir, "history" });
+    const path = try Dir.path.join(a, &.{ dir, "history" });
 
     // Paste an image into a terminal and the shell keeps what survived of it.
     // Run it as the last line of a buffer ending in a command that works and
@@ -433,7 +433,7 @@ test "a command holding a credential never reaches the store" {
     defer tmp.cleanup();
 
     const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
-    const path = try std.fs.path.join(a, &.{ dir, "history" });
+    const path = try Dir.path.join(a, &.{ dir, "history" });
 
     try add(io, a, path, "git clone https://me:hunter2@example.com/r.git", "/w", 30);
     try add(io, a, path, "curl -H 'Authorization: Bearer abcdefgh123' https://api", "/w", 31);

@@ -51,7 +51,7 @@ pub fn build(b: *std.Build) void {
         const query = std.Target.Query.parse(.{ .arch_os_abi = triple }) catch @panic("invalid release target triple");
         const release_exe = b.addExecutable(.{
             .name = "whetuu",
-            .root_module = module(b, b.resolveTargetQuery(query), .ReleaseFast, true, options),
+            .root_module = module(b, b.resolveTargetQuery(query), .fast, true, options),
         });
 
         const name = b.fmt("whetuu-{s}-{s}.tar.gz", .{ version, triple });
@@ -127,7 +127,7 @@ pub fn build(b: *std.Build) void {
 fn module(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: ?std.lang.Optimize,
     strip: bool,
     options: *std.Build.Step.Options,
 ) *std.Build.Module {

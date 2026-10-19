@@ -277,8 +277,8 @@ test "the store is scrubbed once for each version that records into it" {
     defer tmp.cleanup();
 
     const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
-    const store = try std.fs.path.join(a, &.{ dir, "history" });
-    const marker = try std.fs.path.join(a, &.{ dir, "cache", scrubbed_name });
+    const store = try Io.Dir.path.join(a, &.{ dir, "history" });
+    const marker = try Io.Dir.path.join(a, &.{ dir, "cache", scrubbed_name });
     const leaked = "10\t/w\tgit clone https://me:hunter2@example.com/r.git\n";
 
     try tmp.dir.writeFile(io, .{ .sub_path = "history", .data = leaked });

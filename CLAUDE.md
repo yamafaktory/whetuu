@@ -1,7 +1,7 @@
 # whetū
 
 An opinionated, zero-config, async status line and history picker
-(fish/bash/zsh) in Zig 0.17.
+(fish/bash/zsh) in Zig 0.18.
 The binary is installed as the ASCII command `whetuu` (whetū is Māori for "star").
 
 The status line format and module set are hardcoded — there is intentionally no
