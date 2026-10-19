@@ -147,7 +147,7 @@ pub fn run(io: Io, arena: Allocator, env: *const Env) Result {
 /// priority order.
 pub fn detect(io: Io, cwd: []const u8) ?Lang {
     var dir: ?[]const u8 = cwd;
-    while (dir) |d| : (dir = std.fs.path.dirname(d)) {
+    while (dir) |d| : (dir = Io.Dir.path.dirname(d)) {
         if (detectIn(io, d)) |lang| return lang;
     }
 
@@ -321,7 +321,7 @@ test "detect finds a marker in an ancestor directory" {
     try tmp.dir.writeFile(io, .{ .sub_path = "build.zig", .data = "" });
     try tmp.dir.createDirPath(io, "a/b/c");
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const len = try tmp.dir.realPathFile(io, "a/b/c", &buf);
 
     const lang = detect(io, buf[0..len]);
@@ -337,7 +337,7 @@ test "detect matches extension markers" {
 
     try tmp.dir.writeFile(io, .{ .sub_path = "main.odin", .data = "" });
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const len = try tmp.dir.realPathFile(io, ".", &buf);
 
     const lang = detect(io, buf[0..len]);
@@ -353,7 +353,7 @@ test "detect prefers a manifest over a stray source extension" {
     try tmp.dir.writeFile(io, .{ .sub_path = "helper.c", .data = "" });
     try tmp.dir.writeFile(io, .{ .sub_path = "build.zig", .data = "" });
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const len = try tmp.dir.realPathFile(io, ".", &buf);
 
     const lang = detect(io, buf[0..len]);

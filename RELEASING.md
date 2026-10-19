@@ -174,9 +174,10 @@ zig build release                    # tarballs marked "dev"
 zig build release -Dversion=v0.1.0   # stamped
 ```
 
-Writes a stripped, `ReleaseFast` tarball per target to `zig-out/release/`. The
-target list lives in `build.zig` (`release_targets`), and CI calls this same
-step, so a local run produces exactly what gets published.
+Writes a stripped tarball per target, built in the `fast` mode, to
+`zig-out/release/`. The target list lives in `build.zig` (`release_targets`),
+and CI calls this same step, so a local run produces exactly what gets
+published.
 
 Adding a target is a one-line edit there; CI cross-compiles the whole list on
 every push, which is what catches a platform-specific regression (a

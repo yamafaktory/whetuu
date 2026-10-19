@@ -79,7 +79,7 @@ test "segments keep display order however the work overlaps" {
 
     try tmp.dir.writeFile(io, .{ .sub_path = "build.zig", .data = "" });
 
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const cwd = path_buf[0..try tmp.dir.realPathFile(io, ".", &path_buf)];
 
     const env: Env = .{
@@ -100,7 +100,7 @@ test "segments keep display order however the work overlaps" {
     // separate module from the one that writes it. Detecting early must not
     // write early: the directory still comes first, and the language logo after
     // whatever git had to say.
-    const dir_at = std.mem.indexOf(u8, out, std.fs.path.basename(cwd)).?;
+    const dir_at = std.mem.indexOf(u8, out, Io.Dir.path.basename(cwd)).?;
     const lang_at = std.mem.indexOf(u8, out, language.detect(io, cwd).?.icon).?;
     try std.testing.expect(dir_at < lang_at);
 

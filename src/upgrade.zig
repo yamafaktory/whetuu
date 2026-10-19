@@ -142,7 +142,7 @@ pub fn run(io: Io, arena: Allocator, environ: Environ, args: []const [:0]const u
     // resolved through their symlinks, so the upgrade lands on the binary
     // rather than on a link to it.
     const exe = std.process.executablePathAlloc(io, arena) catch fail(io, "could not find the running binary", .{});
-    const dir_path = std.fs.path.dirname(exe) orelse fail(io, "the running binary has no directory: {s}", .{exe});
+    const dir_path = Io.Dir.path.dirname(exe) orelse fail(io, "the running binary has no directory: {s}", .{exe});
     // Checked before the download rather than after it, so a binary installed
     // somewhere only root can write fails in a second instead of a megabyte.
     Io.Dir.accessAbsolute(io, dir_path, .{ .write = true }) catch fail(
@@ -178,7 +178,7 @@ pub fn run(io: Io, arena: Allocator, environ: Environ, args: []const [:0]const u
     }
     try step(out, "verify", "sha256 matches SHA256SUMS");
 
-    install(io, arena, dir, std.fs.path.basename(exe), tarball) catch |err| switch (err) {
+    install(io, arena, dir, Io.Dir.path.basename(exe), tarball) catch |err| switch (err) {
         error.BadArchive => fail(io, "could not unpack {s}. Nothing was changed.", .{name}),
         error.NoBinary => fail(io, "{s} holds no whetuu binary. Nothing was changed.", .{name}),
         error.WriteFailed => fail(io, "could not write the new binary to {s}", .{dir_path}),
@@ -242,12 +242,12 @@ fn install(io: Io, arena: Allocator, dir: Io.Dir, basename: []const u8, tarball:
     const window = try arena.alloc(u8, std.compress.flate.max_window_len);
     var decompress: std.compress.flate.Decompress = .init(&gzip, .gzip, window);
     var it: std.tar.Iterator = .init(&decompress.reader, .{
-        .file_name_buffer = try arena.alloc(u8, std.fs.max_path_bytes),
-        .link_name_buffer = try arena.alloc(u8, std.fs.max_path_bytes),
+        .file_name_buffer = try arena.alloc(u8, Io.Dir.max_path_bytes),
+        .link_name_buffer = try arena.alloc(u8, Io.Dir.max_path_bytes),
     });
 
     while (it.next() catch return error.BadArchive) |entry| {
-        if (entry.kind != .file or !std.mem.eql(u8, std.fs.path.basename(entry.name), "whetuu")) continue;
+        if (entry.kind != .file or !std.mem.eql(u8, Io.Dir.path.basename(entry.name), "whetuu")) continue;
 
         var staged = dir.createFileAtomic(io, basename, .{ .permissions = .executable_file, .replace = true }) catch
             return error.WriteFailed;

@@ -89,8 +89,8 @@ fn worthAsking(git_dir: ?[]const u8, git_dir_env: []const u8) bool {
 /// it. Null outside a repository.
 fn findGitDir(io: Io, arena: Allocator, cwd: []const u8) ?[]const u8 {
     var dir: ?[]const u8 = cwd;
-    while (dir) |d| : (dir = std.fs.path.dirname(d)) {
-        const dot_git = std.fs.path.join(arena, &.{ d, ".git" }) catch return null;
+    while (dir) |d| : (dir = Dir.path.dirname(d)) {
+        const dot_git = Dir.path.join(arena, &.{ d, ".git" }) catch return null;
         if (Io.Dir.openDirAbsolute(io, dot_git, .{})) |opened| {
             var probe = opened;
             probe.close(io);
@@ -101,8 +101,8 @@ fn findGitDir(io: Io, arena: Allocator, cwd: []const u8) ?[]const u8 {
         if (!std.mem.startsWith(u8, bytes, "gitdir:")) continue;
 
         const target = std.mem.trim(u8, bytes["gitdir:".len..], " \r\n");
-        if (std.fs.path.isAbsolute(target)) return target;
-        return std.fs.path.resolve(arena, &.{ d, target }) catch null;
+        if (Dir.path.isAbsolute(target)) return target;
+        return Dir.path.resolveAlloc(arena, &.{ d, target }) catch null;
     }
 
     return null;
@@ -135,11 +135,11 @@ fn stateText(io: Io, arena: Allocator, git_dir: []const u8) ?[]const u8 {
 /// followed first.
 fn stashCount(io: Io, arena: Allocator, git_dir: []const u8) u32 {
     const common = if (readGitFile(io, arena, git_dir, "commondir")) |target|
-        (if (std.fs.path.isAbsolute(target)) target else std.fs.path.resolve(arena, &.{ git_dir, target }) catch return 0)
+        (if (Dir.path.isAbsolute(target)) target else Dir.path.resolveAlloc(arena, &.{ git_dir, target }) catch return 0)
     else
         git_dir;
 
-    const path = std.fs.path.join(arena, &.{ common, "logs/refs/stash" }) catch return 0;
+    const path = Dir.path.join(arena, &.{ common, "logs/refs/stash" }) catch return 0;
     const bytes = Dir.cwd().readFileAlloc(io, path, arena, .limited(1 << 20)) catch return 0;
 
     var count: u32 = @intCast(std.mem.count(u8, bytes, "\n"));
@@ -150,7 +150,7 @@ fn stashCount(io: Io, arena: Allocator, git_dir: []const u8) u32 {
 /// Reads a small file under `git_dir`, whitespace-trimmed; null when the file
 /// is missing or empty.
 fn readGitFile(io: Io, arena: Allocator, git_dir: []const u8, sub: []const u8) ?[]const u8 {
-    const path = std.fs.path.join(arena, &.{ git_dir, sub }) catch return null;
+    const path = Dir.path.join(arena, &.{ git_dir, sub }) catch return null;
     const bytes = Dir.cwd().readFileAlloc(io, path, arena, .limited(4096)) catch return null;
     const trimmed = std.mem.trim(u8, bytes, " \t\r\n");
     return if (trimmed.len == 0) null else trimmed;
@@ -158,7 +158,7 @@ fn readGitFile(io: Io, arena: Allocator, git_dir: []const u8, sub: []const u8) ?
 
 /// True when `git_dir/sub` exists, whatever it is.
 fn gitPathExists(io: Io, arena: Allocator, git_dir: []const u8, sub: []const u8) bool {
-    const path = std.fs.path.join(arena, &.{ git_dir, sub }) catch return false;
+    const path = Dir.path.join(arena, &.{ git_dir, sub }) catch return false;
     Dir.accessAbsolute(io, path, .{}) catch return false;
     return true;
 }
@@ -361,7 +361,7 @@ test "state and stashes are read from a plain .git directory" {
     try tmp.dir.writeFile(io, .{ .sub_path = ".git/logs/refs/stash", .data = "a\nb\nc\n" });
     try tmp.dir.createDirPath(io, "nested/deep");
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [Dir.max_path_bytes]u8 = undefined;
     const len = try tmp.dir.realPathFile(io, "nested/deep", &buf);
 
     const git_dir = findGitDir(io, a, buf[0..len]).?;
@@ -382,7 +382,7 @@ test "merge state is detected and a clean git dir has none" {
 
     try tmp.dir.createDirPath(io, ".git");
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [Dir.max_path_bytes]u8 = undefined;
     const len = try tmp.dir.realPathFile(io, ".", &buf);
     const git_dir = findGitDir(io, a, buf[0..len]).?;
 
@@ -410,7 +410,7 @@ test "a gitdir pointer file is followed to the real git directory" {
     try tmp.dir.createDirPath(io, "repo/.git/logs/refs");
     try tmp.dir.writeFile(io, .{ .sub_path = "repo/.git/logs/refs/stash", .data = "one\n" });
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [Dir.max_path_bytes]u8 = undefined;
     const len = try tmp.dir.realPathFile(io, "wt", &buf);
     const git_dir = findGitDir(io, a, buf[0..len]).?;
 

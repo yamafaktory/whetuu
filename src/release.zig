@@ -57,7 +57,7 @@ pub fn cacheFile(buf: []u8, xdg_cache_home: []const u8, home: []const u8, name: 
 }
 
 /// Enough for the cache path on any sane system, and for the one line in it.
-pub const path_buf_len = std.fs.max_path_bytes;
+pub const path_buf_len = Io.Dir.max_path_bytes;
 pub const line_buf_len = 128;
 
 /// Reads the remembered tag into `buf`, or null on any miss: no file, no read,
@@ -84,7 +84,7 @@ pub fn readCache(io: Io, path: []const u8, buf: []u8) ?Checked {
 pub fn writeCache(io: Io, path: []const u8, tag: []const u8, at: i64) bool {
     if (std.mem.indexOfAny(u8, tag, "\t\n") != null) return false;
 
-    const dir_path = std.fs.path.dirname(path) orelse return false;
+    const dir_path = Io.Dir.path.dirname(path) orelse return false;
     Io.Dir.cwd().createDirPath(io, dir_path) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return false,
@@ -93,7 +93,7 @@ pub fn writeCache(io: Io, path: []const u8, tag: []const u8, at: i64) bool {
     var dir = Io.Dir.openDirAbsolute(io, dir_path, .{}) catch return false;
     defer dir.close(io);
 
-    var staged = dir.createFileAtomic(io, std.fs.path.basename(path), .{
+    var staged = dir.createFileAtomic(io, Io.Dir.path.basename(path), .{
         .permissions = .fromMode(0o600),
         .replace = true,
     }) catch return false;
@@ -184,7 +184,7 @@ test "the cache remembers a tag and the time it was learned" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [Io.Dir.max_path_bytes]u8 = undefined;
     const dir_path = dir_buf[0..try tmp.dir.realPath(io, &dir_buf)];
     var path_buf: [path_buf_len]u8 = undefined;
     const path = cachePath(&path_buf, dir_path, "").?;
