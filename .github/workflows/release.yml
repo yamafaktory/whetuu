@@ -7,9 +7,6 @@ on:
 permissions:
   contents: write
 
-env:
-  ZIG_VERSION: 0.18.0-dev.1005+75d48dfff
-
 jobs:
   release:
     name: Build and publish
@@ -17,8 +14,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
 
       # A tag must never publish a binary whose tests never ran.
       - run: zig build test
