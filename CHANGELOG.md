@@ -3,6 +3,13 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.19 — 2026-11-12
+
+### Changed
+
+- Build with Zig 0.18.0-dev.1005
+- Read the rebase state and stashes from the repository $GIT_DIR names
+
 ## v0.1.18 — 2026-10-19
 
 ### Changed
@@ -50,7 +57,6 @@ Every released version, newest first. Generated from the commit history by
 
 ### Changed
 
-- Keep the fuzz and lint commits out of the changelog
 - Build against a newer Zig master
 
 ### Fixed
