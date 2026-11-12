@@ -35,7 +35,7 @@ few minutes later, at
 
 ## What CI checks
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs four jobs on every
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs five jobs on every
 push to `main` and every pull request. `zig build publish` waits on the whole
 run, so any one of them going red stops a release. A branch gets CI once it has
 a pull request, a draft one included.
@@ -46,6 +46,10 @@ a pull request, a draft one included.
   for macOS, and file locks, inode numbers and renames behave differently
   there. The end to end scripts stay on Linux: `test-init.sh` needs the bash 5
   that macOS does not ship.
+- **Fuzz** — `tools/fuzz.sh`, which runs the property tests as fuzz targets
+  for 100K iterations. It goes through a script because `zig build` exits 0
+  when a fuzz target fails. The script fails when the fuzzer saves a crash
+  input instead.
 - **Lint the tools and the shell integration** — `ruff` over `tools/`, then
   `shellcheck` over `tools/*.sh`, `docs/install.sh` and `assets/init.bash`.
   shellcheck reads sh and bash only. `assets/init.zsh` and `assets/init.fish`
@@ -54,6 +58,9 @@ a pull request, a draft one included.
   registers its hook, and that the fish and zsh integrations leave out what
   your own shell filters leave out. `zig build test` cannot reach either.
 - **Cross-compile release targets** — `zig build release`.
+
+Both workflows install the Zig that `minimum_zig_version` in `build.zig.zon`
+names. A move to a new nightly is a change to that one line.
 
 The ruff version is pinned as `RUFF_VERSION` in the workflow. Bump it in a
 commit of its own, so a new rule never turns a release red inside an unrelated

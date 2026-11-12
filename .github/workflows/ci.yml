@@ -10,7 +10,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZIG_VERSION: 0.18.0-dev.349+d924f83bf
   RUFF_VERSION: 0.16.3
 
 jobs:
@@ -20,8 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
       - run: zig fmt --check src build.zig
       - run: zig build check
       - run: zig build test
@@ -39,9 +36,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
       - run: zig build test
+
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+      - run: ./tools/fuzz.sh
 
   lint:
     name: Lint the tools and the shell integration
@@ -75,6 +78,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
       - run: zig build release

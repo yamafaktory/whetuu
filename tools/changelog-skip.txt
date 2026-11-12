@@ -24,3 +24,4 @@ c09fb14497e5de76847d317133b012f0f4d55718  Make publish cut a release end to end
 # Test and lint machinery. It guards the code without changing any of it.
 44e3b83d5cba627a7801240797516e8ade9774e9  Fuzz the parsers behind the status line and the picker
 38d272468890d9ae1f3c6e6c5c958c213e3e5618  Lint the tools and the shell integration in CI
+ce60f9998a881e738d56de73ae75ce00032c29c3  Fuzz the parsers in CI and pin Zig in build.zig.zon only

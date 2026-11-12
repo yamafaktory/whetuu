@@ -6,8 +6,8 @@
 //! stash count are read straight from the `.git` directory — no extra
 //! subprocess.
 //!
-//! The walk to that directory happens first, and git is only asked once it has
-//! found one. Outside a repository the subprocess was most of what a render
+//! `locate` finds that directory first, and the renderer only asks git once it
+//! has found one. Outside a repository the subprocess was most of what a render
 //! cost, to be told there is no repository — an answer a handful of stat calls
 //! already had.
 
@@ -42,12 +42,10 @@ const GitInfo = struct {
     behind: u32 = 0,
 };
 
-/// Renders the git segment, or null when not in a repo (or git is unavailable,
-/// times out, or output cannot be allocated).
-pub fn run(io: Io, arena: Allocator, env: *const Env) ?[]const Span {
-    const git_dir = findGitDir(io, arena, env.cwd);
-    if (!worthAsking(git_dir, env.git_dir)) return null;
-
+/// Renders the git segment for the repository at `git_dir`, which `locate`
+/// found. Null when git is unavailable, times out, or output cannot be
+/// allocated.
+pub fn run(io: Io, arena: Allocator, env: *const Env, git_dir: []const u8) ?[]const Span {
     const raw = gitStatus(io, arena, env.cwd) orelse return null;
     var info = parse(raw);
 
@@ -58,13 +56,10 @@ pub fn run(io: Io, arena: Allocator, env: *const Env) ?[]const Span {
     const branch = std.fmt.allocPrint(arena, "{s} {s}", .{ branch_icon, name }) catch return null;
     spans.append(arena, .{ .style = .{ .bold = true, .color = .magenta }, .text = branch }) catch return null;
 
-    if (git_dir) |dir| {
-        info.stashes = stashCount(io, arena, dir);
-
-        if (stateText(io, arena, dir)) |state| {
-            spans.append(arena, .{ .text = " " }) catch return null;
-            spans.append(arena, .{ .style = .{ .bold = true, .color = .yellow }, .text = state }) catch return null;
-        }
+    info.stashes = stashCount(io, arena, git_dir);
+    if (stateText(io, arena, git_dir)) |state| {
+        spans.append(arena, .{ .text = " " }) catch return null;
+        spans.append(arena, .{ .style = .{ .bold = true, .color = .yellow }, .text = state }) catch return null;
     }
 
     if (statusText(arena, info) catch null) |text| {
@@ -76,12 +71,13 @@ pub fn run(io: Io, arena: Allocator, env: *const Env) ?[]const Span {
     return spans.toOwnedSlice(arena) catch null;
 }
 
-/// Whether running git is worth a fork and an exec. The walk answers it in a
-/// handful of stat calls everywhere except under `$GIT_DIR`, which names a
-/// repository no walk from `cwd` can reach, so a set value falls through to git
-/// and lets it resolve the repository as it always did.
-fn worthAsking(git_dir: ?[]const u8, git_dir_env: []const u8) bool {
-    return git_dir != null or git_dir_env.len > 0;
+/// The git directory the segment describes, or null when there is none and
+/// git is not worth a fork and an exec. `$GIT_DIR` comes first because git
+/// status follows it, and the state read beside the branch has to come from
+/// the same repository. Otherwise the walk answers in a handful of stat calls.
+pub fn locate(io: Io, arena: Allocator, env: *const Env) ?[]const u8 {
+    if (env.git_dir.len > 0) return Dir.path.resolveAlloc(arena, &.{ env.cwd, env.git_dir }) catch null;
+    return findGitDir(io, arena, env.cwd);
 }
 
 /// Finds the repository's git directory by walking up from `cwd` and, for a
@@ -285,19 +281,54 @@ fn writeMarkers(w: *Writer, info: GitInfo) Writer.Error!void {
     try w.writeByte(']');
 }
 
-test "git is asked only when a repository is in reach" {
-    // The ordinary case: the walk found the repository, so git has something to
-    // report and is worth starting.
-    try std.testing.expect(worthAsking("/w/.git", ""));
+fn testEnv(cwd: []const u8, git_dir: []const u8) Env {
+    return .{
+        .shell = .fish,
+        .cwd = cwd,
+        .home = "/nonexistent-home",
+        .git_dir = git_dir,
+        .width = 80,
+        .duration_ms = 0,
+        .exit_status = 0,
+    };
+}
 
-    // Nothing above cwd is a repository and no `$GIT_DIR` overrides that, so the
-    // subprocess could only ever say the same. Running it anyway was most of
-    // what a render cost outside a repository.
-    try std.testing.expect(!worthAsking(null, ""));
+test "the repository comes from $GIT_DIR before the walk" {
+    const io = std.testing.io;
 
-    // `$GIT_DIR` names a repository no walk from cwd can reach, so git resolves
-    // it and the segment appears as it did before the walk gated the call.
-    try std.testing.expect(worthAsking(null, "/elsewhere/.git"));
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "here/.git/rebase-merge");
+    try tmp.dir.writeFile(io, .{ .sub_path = "here/.git/rebase-merge/msgnum", .data = "2\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "here/.git/rebase-merge/end", .data = "7\n" });
+    try tmp.dir.createDirPath(io, "other/.git");
+    try tmp.dir.writeFile(io, .{ .sub_path = "other/.git/MERGE_HEAD", .data = "" });
+
+    var root_buf: [Dir.max_path_bytes]u8 = undefined;
+    const root = root_buf[0..try tmp.dir.realPathFile(io, ".", &root_buf)];
+    const here = try Dir.path.join(a, &.{ root, "here" });
+    const other = try Dir.path.join(a, &.{ root, "other/.git" });
+
+    // git status follows `$GIT_DIR`, so the state beside its branch has to come
+    // from the same repository and not from the one around cwd.
+    const named = locate(io, a, &testEnv(here, other)).?;
+    try std.testing.expectEqualStrings("(merging)", stateText(io, a, named).?);
+
+    // git resolves a relative `$GIT_DIR` against the directory it runs in.
+    const relative = locate(io, a, &testEnv(root, "other/.git")).?;
+    try std.testing.expectEqualStrings(other, relative);
+
+    const walked = locate(io, a, &testEnv(here, "")).?;
+    try std.testing.expectEqualStrings("(rebasing 2/7)", stateText(io, a, walked).?);
+
+    // No repository above cwd and no `$GIT_DIR`: git could only say the same,
+    // so there is nothing to start.
+    try std.testing.expect(locate(io, a, &testEnv("/", "")) == null);
 }
 
 test "parses branch, ahead/behind, and changes" {

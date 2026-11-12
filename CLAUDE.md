@@ -173,13 +173,13 @@ by someone deciding whether to use whetuu, so it has to be plain.
 - `zig build --release=fast` — optimized build installed to `zig-out/bin/whetuu`,
   for trying a change locally. Run after every change (see above)
 - `zig build check` — type-check without producing an artifact
-- `zig build test --fuzz=<n>` — run the property tests as fuzz targets for `n`
-  iterations, e.g. `--fuzz=300K`. Passing no limit serves a web UI instead. The
-  fuzzer does find real failures, but the report it prints at the end always
-  fails with `corrupted coverage file ... pcs_len was zero` on the pinned Zig,
-  so read a run as clean when it names no failing test. That is why CI does not
-  run it. Under a plain `zig build test` a fuzz target sees one trivial input,
-  so it is worth running by hand after touching a parser
+- `tools/fuzz.sh [n]` — run the property tests as fuzz targets for `n`
+  iterations, 100K when left out. CI runs it. Use it rather than
+  `zig build test --fuzz=<n>` directly. When a fuzz target fails, `zig build`
+  prints the failure and still exits 0. The script fails when the fuzzer leaves
+  a crash input in `.zig-cache/f/crash`. `zig build test --fuzz` with no limit
+  serves a web UI instead. Under a plain `zig build test` a fuzz target sees one
+  trivial input, so run the script by hand after touching a parser
 - `zig build run -- <args>` — compile and run (e.g. `-- render --shell fish --status 0`)
 - `zig build release` — cross-compile + package a tarball per target into
   `zig-out/release/`; `-Dversion=vX.Y.Z` stamps `whetuu --version`

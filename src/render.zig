@@ -23,9 +23,9 @@ const user_host = @import("module_user_host.zig");
 /// breathes between the colored segments on either side.
 const separator: Span = .{ .style = .{ .color = .bright_black }, .text = " · " };
 
-/// Renders the full status line to `w`. Git is spawned before anything else
-/// runs, so its I/O overlaps every other module; writing in display order keeps
-/// layout stable whatever finishes first. The language module runs detection
+/// Renders the full status line to `w`. Once a repository is found, git is
+/// spawned before any other module runs, so its I/O overlaps them; writing in
+/// display order keeps layout stable whatever finishes first. The language module runs detection
 /// exactly once — its result also tints the character, which is pure and
 /// rendered synchronously after the segment line.
 pub fn render(io: Io, arena: Allocator, env: *const Env, w: *Writer) Writer.Error!void {
@@ -33,7 +33,13 @@ pub fn render(io: Io, arena: Allocator, env: *const Env, w: *Writer) Writer.Erro
     // the main thread has nothing else to do but wait for it, so everything
     // else runs here rather than paying to start a second thread — a thread
     // costs more than the language module it would carry.
-    var git_future = io.async(git.run, .{ io, arena, env });
+    var git_future = if (git.locate(io, arena, env)) |git_dir|
+        io.async(git.run, .{ io, arena, env, git_dir })
+    else
+        null;
+    defer if (git_future) |*f| {
+        _ = f.cancel(io);
+    };
 
     var wrote_any = false;
     try writeSegment(w, env.shell, user_host.run(arena, env), &wrote_any);
@@ -42,7 +48,7 @@ pub fn render(io: Io, arena: Allocator, env: *const Env, w: *Writer) Writer.Erro
     // Detected before the wait so it overlaps git, written after it so the
     // segments stay in display order.
     const lang_result = language.run(io, arena, env);
-    try writeSegment(w, env.shell, git_future.await(io), &wrote_any);
+    try writeSegment(w, env.shell, if (git_future) |*f| f.await(io) else null, &wrote_any);
     try writeSegment(w, env.shell, lang_result.spans, &wrote_any);
     try writeSegment(w, env.shell, cmd_duration.run(io, arena, env), &wrote_any);
     try writeSegment(w, env.shell, update.run(io, arena, env), &wrote_any);
