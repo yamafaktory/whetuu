@@ -97,7 +97,8 @@ wrong costs a heading, never an entry.
 A commit that changes nothing a user can observe goes in
 [`tools/changelog-skip.txt`](tools/changelog-skip.txt) by full SHA. Reach for
 it rarely. A subject worth publishing is the better fix, and the list only
-exists because the early history predates the rule.
+exists because the early history predates the rule. A commit that edits only
+that list stays out of the changelog by itself.
 
 ## Releases that need a migration step
 

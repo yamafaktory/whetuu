@@ -42,6 +42,9 @@ if [ -f "$skip_file" ]; then
         skip[$(git rev-parse --short "$sha" 2>/dev/null || printf '%s' "$sha")]=1
     done <"$skip_file"
 fi
+while read -r sha; do
+    [ "$(git show --name-only --format= "$sha")" = "$skip_file" ] && skip[$sha]=1
+done < <(git log --format=%h -- "$skip_file")
 
 # Oldest to newest, so the file can be written newest first.
 mapfile -t tags < <(git tag -l --sort=v:refname)
