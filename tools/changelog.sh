@@ -33,8 +33,9 @@ command -v git >/dev/null 2>&1 || die "git not found on PATH"
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git repository"
 cd "$root"
 
-# Commits that should never reach a user, listed by full SHA in
-# changelog-skip.txt. Abbreviated to match `git log --format=%h` output.
+# Commits that should never reach a user. They are the commits listed by full
+# SHA in changelog-skip.txt, and the commits that edit only that list. Keys are
+# abbreviated to match `git log --format=%h` output.
 declare -A skip=()
 if [ -f "$skip_file" ]; then
     while read -r sha _; do
