@@ -16,6 +16,7 @@ c09fb14497e5de76847d317133b012f0f4d55718  Make publish cut a release end to end
 8c13dfaef1b60f652180db6e5a1c1749eb7e8117  Take the publish tag after -- instead of -Dversion
 3b8a3e5cd4223a902fdaa26da5a3e835af19d5a9  Publish suffixed tags as GitHub pre-releases
 00f9023ca109cc72ed9a036b735a4bf611baab77  Keep commits that only edit the changelog skip list out of the changelog
+7037d0a5eb96f7a4fcfe84033f4929b454208daa  Name both sources of skipped commits in the changelog script
 
 # Prose edits to files a user never opens.
 0663c8afe20b5dfb918d83721d15077504404875  Simplify the README prose
