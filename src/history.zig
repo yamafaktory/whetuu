@@ -96,9 +96,144 @@ pub fn add(io: Io, arena: Allocator, path: []const u8, command: []const u8, cwd:
 
     var buf: [1024]u8 = undefined;
     var writer = file.writer(io, &buf);
-    writer.pos = try file.length(io);
+    const len = try file.length(io);
+    writer.pos = try wholeLength(io, file, len);
+    if (writer.pos != len) try file.setLength(io, writer.pos);
     try writer.interface.writeAll(line);
     try writer.interface.flush();
+}
+
+/// The length of the store up to the end of its last whole record, which is
+/// the last newline. A crash or a full disk during an append leaves a record
+/// without one, and so does a backup copied during one. Reads from the end, so
+/// a store that ends in a newline costs one short read.
+fn wholeLength(io: Io, file: Io.File, len: u64) !u64 {
+    var buf: [1024]u8 = undefined;
+    var end = len;
+    while (end > 0) {
+        const start = end -| buf.len;
+        const read = try file.readPositionalAll(io, buf[0..@intCast(end - start)], start);
+        const records = whole(buf[0..read]);
+        if (records.len > 0) return start + records.len;
+        end = start;
+    }
+    return 0;
+}
+
+/// The whole records in `bytes`. A record counts only once its newline is
+/// written, so a tail without one is cut off, or still being appended.
+fn whole(bytes: []const u8) []const u8 {
+    const last = std.mem.lastIndexOfScalar(u8, bytes, '\n') orelse return "";
+    return bytes[0 .. last + 1];
+}
+
+test "a record cut off mid line is never offered, and the next append removes it" {
+    const io = std.testing.io;
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try Dir.path.join(a, &.{ dir, "history" });
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "history", .data = "10\t/w\tpwd\n20\t/w\trm -rf build" });
+    const before = try load(io, a, path);
+    try std.testing.expectEqual(@as(usize, 1), before.len);
+    try std.testing.expectEqualStrings("pwd", before[0].command);
+
+    try add(io, a, path, "ls", "/w", 30);
+    try add(io, a, path, "make", "/w", 40);
+    const bytes = try tmp.dir.readFileAlloc(io, "history", a, .unlimited);
+    try std.testing.expectEqualStrings("10\t/w\tpwd\n30\t/w\tls\n40\t/w\tmake\n", bytes);
+}
+
+test "a store holding no whole record is emptied before the next append" {
+    const io = std.testing.io;
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try Dir.path.join(a, &.{ dir, "history" });
+
+    const torn = "20\t/w\tgit commit -m " ++ @as([3_000]u8, @splat('x'));
+    try tmp.dir.writeFile(io, .{ .sub_path = "history", .data = torn });
+    try std.testing.expectEqual(@as(usize, 0), (try load(io, a, path)).len);
+
+    try add(io, a, path, "ls", "/w", 30);
+    const bytes = try tmp.dir.readFileAlloc(io, "history", a, .unlimited);
+    try std.testing.expectEqualStrings("30\t/w\tls\n", bytes);
+}
+
+test "a cut record longer than one read is removed back to the record before it" {
+    const io = std.testing.io;
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try Dir.path.join(a, &.{ dir, "history" });
+
+    const torn = "10\t/w\tpwd\n20\t/w\tgit commit -m " ++ @as([3_000]u8, @splat('x'));
+    try tmp.dir.writeFile(io, .{ .sub_path = "history", .data = torn });
+    try add(io, a, path, "ls", "/w", 30);
+    const bytes = try tmp.dir.readFileAlloc(io, "history", a, .unlimited);
+    try std.testing.expectEqualStrings("10\t/w\tpwd\n30\t/w\tls\n", bytes);
+}
+
+test "whole keeps the longest prefix that ends in a newline" {
+    try std.testing.expectEqualStrings("", whole(""));
+    try std.testing.expectEqualStrings("", whole("abc"));
+    try std.testing.expectEqualStrings("a\n", whole("a\nbc"));
+    try std.testing.expectEqualStrings("a\nb\n", whole("a\nb\n"));
+}
+
+test "whole is always a prefix that ends in a newline, and nothing after it has one" {
+    const Context = struct {
+        fn testOne(_: @This(), smith: *std.testing.Smith) anyerror!void {
+            var buf: [512]u8 = undefined;
+            const bytes = buf[0..smith.slice(&buf)];
+            const got = whole(bytes);
+            try std.testing.expect(std.mem.startsWith(u8, bytes, got));
+            try std.testing.expect(got.len == 0 or got[got.len - 1] == '\n');
+            try std.testing.expect(std.mem.indexOfScalar(u8, bytes[got.len..], '\n') == null);
+        }
+    };
+    return std.testing.fuzz(Context{}, Context.testOne, .{});
+}
+
+test "scrub removes a cut last line it matches, and keeps one it does not byte for byte" {
+    const io = std.testing.io;
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const path = try Dir.path.join(a, &.{ dir, "history" });
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "history", .data = "10\t/w\tpwd\n20\t/w\techo internal-pw\n30\t/w\tgit sta" });
+    const kept = try scrub(io, a, path, "internal-pw", false);
+    try std.testing.expectEqual(@as(usize, 3), kept.total);
+    try std.testing.expectEqual(@as(usize, 1), kept.removed.len);
+    const after_keep = try tmp.dir.readFileAlloc(io, "history", a, .unlimited);
+    try std.testing.expectEqualStrings("10\t/w\tpwd\n30\t/w\tgit sta", after_keep);
+
+    const dropped = try scrub(io, a, path, "git sta", false);
+    try std.testing.expectEqual(@as(usize, 1), dropped.removed.len);
+    const after_drop = try tmp.dir.readFileAlloc(io, "history", a, .unlimited);
+    try std.testing.expectEqualStrings("10\t/w\tpwd\n", after_drop);
 }
 
 /// True when a command must never be kept. It holds something shaped like a
@@ -166,7 +301,7 @@ pub fn scrub(io: Io, arena: Allocator, path: []const u8, text: []const u8, dry_r
         const entry = try parse(arena, line);
         if (!matches(entry.command, text)) {
             kept.appendSliceAssumeCapacity(line);
-            kept.appendAssumeCapacity('\n');
+            if (lines.peek() != null) kept.appendAssumeCapacity('\n');
             continue;
         }
         try removed.append(arena, entry);
@@ -340,16 +475,16 @@ pub fn load(io: Io, arena: Allocator, path: []const u8) ![]const Entry {
     const start = size - want;
 
     const buf = try arena.alloc(u8, want);
-    var reader = file.reader(io, buf);
-    reader.seekTo(start) catch return &.{};
-    const bytes = reader.interface.peek(want) catch return &.{};
+    const read = file.readPositionalAll(io, buf, start) catch return &.{};
+    const bytes = buf[0..read];
 
     // Starting mid-file lands mid-record, and half a command is worse than no
     // command. A record can never hold a raw newline (`escape` rewrites it), so
     // the first separator is exactly where the first whole record begins.
-    const whole = if (start == 0) bytes else bytes[(std.mem.indexOfScalar(u8, bytes, '\n') orelse return &.{}) + 1 ..];
+    const records = whole(bytes);
+    const first = if (start == 0) 0 else (std.mem.indexOfScalar(u8, records, '\n') orelse return &.{}) + 1;
 
-    return dedupe(arena, whole);
+    return dedupe(arena, records[first..]);
 }
 
 /// Feeds whole records to the deduper, newest first, keeping the first sighting

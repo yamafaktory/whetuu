@@ -220,7 +220,8 @@ whetuu reads your repository and prints a line. Here is what that involves.
   it is written to `scrubbed`, so it happens once per version.
 
   This deletes commands without asking. The patterns are strict so that what
-  goes is what the list above says. A command it removes is gone for good.
+  goes is what the list above says. A command it removes is gone from the
+  store for good. A backup taken before the removal still holds it.
 
   For a secret the list cannot know, like a password or an internal host name,
   remove it yourself. Start the line with a space, so neither whetuu nor your
@@ -441,9 +442,10 @@ shells, at `~/.local/share/whetuu/history`. It moves under `$XDG_DATA_HOME` when
 that variable is set. macOS uses the same path rather than `~/Library`, so the
 store stays put when you share a dotfiles setup across machines.
 
-whetuu deletes nothing from it except credentials: once per version, what the
-secret patterns match, and whatever you name with `whetuu scrub`. See
-[Security](#security). The picker reads the most recent few megabytes
+whetuu deletes only two things from it. The first is credentials: once per
+version, what the secret patterns match, and whatever you name with `whetuu
+scrub`. See [Security](#security). The second is a last line cut off halfway.
+See [Backup](#backup). The picker reads the most recent few megabytes
 rather than the whole file, so it opens just as fast on a store built over years
 as on a fresh one. Everything you have run stays on disk either way, and on a
 store that large the commands past the window are ones you last ran years ago.
@@ -565,6 +567,25 @@ exactly as it was recorded.
 The picker draws on `/dev/tty`, so nothing but the chosen command reaches
 stdout. Duplicates are collapsed per directory, so the same command run in two
 projects keeps its own recency in each.
+
+### Backup
+
+To back up your history, copy the store with the backup tool you already use.
+It is one plain text file. A copy taken while a command is recorded can end
+halfway through a line. whetuu ignores a last line that does not end in a
+newline, and removes it when it records the next command. The cut costs that
+one command. If you edit the store by hand, end it with a newline, or whetuu
+treats your last line the same way.
+
+To restore it, copy the backup next to the store, then move it over the store.
+The move replaces the file in one step, so a shell that records a command at
+the same moment cannot mix the two. Commands recorded since the backup are
+lost.
+
+Then run `whetuu scrub` again. A backup keeps every command a scrub removed
+after the backup was taken. A plain `whetuu scrub` removes again what the
+secret patterns match, including what a newer version removed by itself. Repeat
+each `whetuu scrub <text>` you ran since the backup.
 
 ## License
 
