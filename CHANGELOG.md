@@ -3,6 +3,12 @@
 Every released version, newest first. Generated from the commit history by
 `zig build changelog`, so it is never edited by hand.
 
+## v0.1.20 — 2026-11-19
+
+### Changed
+
+- Ignore a history line cut off halfway, and document backup and restore
+
 ## v0.1.19 — 2026-11-12
 
 ### Changed
